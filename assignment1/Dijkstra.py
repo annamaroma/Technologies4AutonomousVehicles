@@ -94,50 +94,60 @@ def reconstruct_path(orig, dest, plot=False, algorithm=None):
     dist /= 1000
 
 
+#metto in un vettore di stringhe le due città, una alla volta, e faccio il ciclo per entrambe
+cities = ["Turin, Piedmont, Italy", "Aosta, Aosta, Italy"]
+
+for city in cities:
+
+    print("Loading graph for ", city)
+    place_name = city
+    G = ox.graph_from_place(place_name, network_type="drive")
+
+    for edge in G.edges:
+        # Cleaning the "maxspeed" attribute, some values are lists, some are strings, some are None
+        maxspeed = 40
+        if "maxspeed" in G.edges[edge]:
+            maxspeed = G.edges[edge]["maxspeed"]
+            if type(maxspeed) == list:
+                #speeds = [ int(speed) for speed in maxspeed ]
+                speeds = [int(speed) if speed != "walk" else 1 for speed in maxspeed]
+                maxspeed = min(speeds)
+            elif type(maxspeed) == str:
+                if maxspeed == "walk": 
+                    maxspeed = 1
+                else:
+                    maxspeed = maxspeed.strip(" mph")
+                    maxspeed = int(maxspeed)
+        G.edges[edge]["maxspeed"] = maxspeed
+        # Adding the "weight" attribute (time = distance / speed)
+        G.edges[edge]["weight"] = G.edges[edge]["length"] / maxspeed
 
 
-#place_name = "Turin, Piedmont, Italy"
-place_name = "Aosta, Aosta, Italy"
-G = ox.graph_from_place(place_name, network_type="drive")
+    for edge in G.edges:
+        G.edges[edge]["dijkstra_uses"] = 0
 
-for edge in G.edges:
-    # Cleaning the "maxspeed" attribute, some values are lists, some are strings, some are None
-    maxspeed = 40
-    if "maxspeed" in G.edges[edge]:
-        maxspeed = G.edges[edge]["maxspeed"]
-        if type(maxspeed) == list:
-            #speeds = [ int(speed) for speed in maxspeed ]
-            speeds = [int(speed) if speed != "walk" else 1 for speed in maxspeed]
-            maxspeed = min(speeds)
-        elif type(maxspeed) == str:
-            if maxspeed == "walk": 
-                maxspeed = 1
-            else:
-                maxspeed = maxspeed.strip(" mph")
-                maxspeed = int(maxspeed)
-    G.edges[edge]["maxspeed"] = maxspeed
-    # Adding the "weight" attribute (time = distance / speed)
-    G.edges[edge]["weight"] = G.edges[edge]["length"] / maxspeed
+    convergenceIterations = []
 
+    print("Running Dijkstra's algorithm on ", city, "over 10 pairs of random nodes")
+    for i in range(10):
+        print("Running Dijkstra, iteration ", i+1)
 
-for edge in G.edges:
-    G.edges[edge]["dijkstra_uses"] = 0
+        start = random.choice(list(G.nodes))
+        print("Start node: ", start)
+        end = random.choice(list(G.nodes))
+        print("End node: ", end)
 
+        print("Nodes: ", len(G.nodes))
+        print("Edges: ", len(G.edges))
+        iterations = dijkstra(start, end)
+        convergenceIterations.append(iterations)
+        print( "Done for the", i+1, "iteration, reconstructing path and plotting graph" )
 
-convergenceIterations = []
+        reconstruct_path(start, end, algorithm="dijkstra", plot=True)
+        plot_graph()
 
-for i in range(10):
-    start = random.choice(list(G.nodes))
-    end = random.choice(list(G.nodes))
-
-    print("Running Dijkstra, iteration ", i+1)
-    print("Nodes: ", len(G.nodes))
-    print("Edges: ", len(G.edges))
-    iterations = dijkstra(start, end)
-    convergenceIterations.append(iterations)
-    print( "Done")
-
-    reconstruct_path(start, end, algorithm="dijkstra", plot=True)
-    plot_graph()
-
-
+    #calculate average iterations over 10 pairs of randomly selected points
+    avg_iterations = sum(convergenceIterations) / len(convergenceIterations)
+    print("Done running Dijkstra for ", city)
+    print("Average iterations to convergence over 10 runs:", avg_iterations)
+    
