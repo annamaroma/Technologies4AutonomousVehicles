@@ -55,7 +55,7 @@ def dijkstra(orig, dest, plot=False):
     pq = [(0, orig)]
     step = 0
     while pq:
-        _, node = heapq.heappop(pq)
+        _, node = heapq.heappop(pq) #takes the node with the smallest distance from the priority queue
         if node == dest:
             print("Iterations to convergence:", step)
             #plot_graph()
@@ -63,10 +63,12 @@ def dijkstra(orig, dest, plot=False):
         if G.nodes[node]["visited"]:
             continue
         G.nodes[node]["visited"] = True
-        for edge in G.out_edges(node):
+        for edge in G.out_edges(node): #iterates over the outgoing edges of the current node
             style_visited_edge((edge[0], edge[1], 0))
             neighbor = edge[1]
             weight = G.edges[(edge[0], edge[1], 0)]["weight"]
+            #relaxation step
+            #if distance to neighbor through current node is less than previously known distance, update it and add to priority queue
             if G.nodes[neighbor]["distance"] > G.nodes[node]["distance"] + weight:
                 G.nodes[neighbor]["distance"] = G.nodes[node]["distance"] + weight
                 G.nodes[neighbor]["previous"] = node
@@ -77,6 +79,9 @@ def dijkstra(orig, dest, plot=False):
     # if destination wasn't reached, return final step count
     return step
 
+#reconstructs the final path from dest to origin using the "previous" attribute of each node, styles the path edges
+#increments the usage counter for each edge in the path. 
+#calculates the total distance of the path in kilometers.
 def reconstruct_path(orig, dest, plot=False, algorithm=None):
     for edge in G.edges:
         style_unvisited_edge(edge)
