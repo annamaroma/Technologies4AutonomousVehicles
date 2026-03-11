@@ -10,18 +10,35 @@ import math
 import random
 
 #define first heuristic function: Manhattan distance
-def manhattan_heuristic(node, goal, maxspeed):
+def heuristic_computation(node, goal, maxspeed, type="heuristicType"):
     #current node coordinates
     x1, y1 = G.nodes[node]["x"], G.nodes[node]["y"]
     #goal node coordinates
     x2, y2 = G.nodes[goal]["x"], G.nodes[goal]["y"]
 
-    #mahattan distance formula
-    distance = abs(x1 - x2) + abs(y1 - y2)
-    return distance/maxspeed
+    if type == "Manhattan":
+        #mahattan distance formula
+        distance = abs(x1 - x2) + abs(y1 - y2)
+        return distance/maxspeed
+    elif type == "Euclidean":
+        #euclidean distance formula
+        distance = math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+        return distance/maxspeed
+    elif type == "Haversine":
+        #haversine distance formula
+        R = 6371e3 # Earth radius in meters
+        phi1 = math.radians(y1)
+        phi2 = math.radians(y2)
+        delta_phi = math.radians(y2 - y1)
+        delta_lambda = math.radians(x2 - x1)
+
+        a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        distance = R * c
+        return distance/maxspeed
 
 #implement A* algorithm
-def astar(orig, dest):
+def astar(orig, dest, heuristic_type="heuristicType"):
     for node in G.nodes:
         G.nodes[node]["visited"] = False #to keep track of visited nodes
         G.nodes[node]["g_score"] = float("inf") #g(n) = cost from start to current node
@@ -29,8 +46,9 @@ def astar(orig, dest):
         G.nodes[node]["previous"] = None #to reconstruct the path at the end
 
     G.nodes[orig]["g_score"] = 0 #cost from start to start is 0
-    G.nodes[orig]["f_score"] = manhattan_heuristic(orig, dest, G.nodes[orig]["maxspeed"]) #f(n)= 0+h(n) for the start node is just the heuristic estimate to the goal
-    
+    G.nodes[orig]["f_score"] = heuristic_computation(orig, dest, G.nodes[orig]["maxspeed"], heuristic_type) #f(n)= 0+h(n) for the start node is just the heuristic estimate to the goal
+    print(f"Starting A* with {heuristic_type} heuristic from node {orig} to node {dest}")
+
     # Priority Queue 
     pq = [(G.nodes[orig]["f_score"], orig)]
     step = 0
@@ -39,7 +57,7 @@ def astar(orig, dest):
         current_f, node = heapq.heappop(pq)
         
         if node == dest:
-            print(f"A* Manhattan terminato in {step} iterazioni")
+            print(f"A* {heuristic_type} terminato in {step} iterazioni")
             return step
             
         if G.nodes[node]["visited"]:
@@ -88,16 +106,20 @@ for u, v, k, data in G.edges(data=True, keys=True):
     # Peso = Lunghezza / Velocità (Tempo)
     data["weight"] = data["length"] / maxspeed
 
+heuristic_types = ["Manhattan", "Euclidean", "Haversine"]
+for i in range(3):
+    heuristic_type = heuristic_types[i]
+    print(f"\nRunning A* with {heuristic_type} heuristic...")
 
-print("Running A* with Manhattan heuristic...")
-results = []
-for i in range(10):
-    start = random.choice(list(G.nodes))
-    dest = random.choice(list(G.nodes))    
-    print(f"Start: {start}, Destination: {dest}")
-    steps = astar(start, dest)
-    results.append(steps)
-    print(f"Run number {i+1} takes {steps} steps to convergence\n")
-average_steps = sum(results) / len(results)
-print(f"Average steps to convergence over 10 runs: {average_steps}")
+    results = []
+    for i in range(10):
+        start = random.choice(list(G.nodes))
+        dest = random.choice(list(G.nodes))    
+        print(f"Start: {start}, Destination: {dest}")
+        steps = astar(start, dest, heuristic_type)
+        results.append(steps)
+        print(f"Run number {i+1} takes {steps} steps to convergence\n")
+    average_steps = sum(results) / len(results)
+    print(f"Average steps to convergence over 10 runs: {average_steps}")
+
 
