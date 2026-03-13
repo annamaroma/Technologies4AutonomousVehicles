@@ -5,6 +5,8 @@ import random
 import argparse
 from typing import List, Optional, Tuple 
 import matplotlib.pyplot as plt 
+import os 
+import numpy as np 
 
 #maxspeed_handler normalize maxspeed values, converting them into consistent integers
 #in order to use the same unit of measure used in the Dijkstra algorithm, we check also that time is in millesimi di ora = sistance [km] / velocity [km/h] * 1000 
@@ -60,9 +62,20 @@ def prepare_graph(city: str):
 
 def reconstruct_path(G, orig: int, dest: int, algorithm: Optional[str] = None) -> Optional[List[int]]:
     for node in G.nodes:
-        G.nodes[node]["size"] = 10
-        G.nodes[node]["color"] = "white"
-    
+        visited = G.nodes[node].get("visited", False)
+        if node == orig:
+            G.nodes[node]["size"] = 80
+            G.nodes[node]["color"] = "green"
+        elif node == dest:
+            G.nodes[node]["size"] =80
+            G.nodes[node]["color"] = "red"
+        elif visited:
+            G.nodes[node]["size"] = 1
+            G.nodes[node]["color"] = "white"
+        else:
+            G.nodes[node]["size"] = 0.2
+            G.nodes[node]["color"] = "white"
+
     for edge in G.edges:
         style_unvisited_edge(G, edge)
     
@@ -114,17 +127,17 @@ def style_path_edge(graph, edge):
 #plot graph: ax is the axis on which to plot, if None a new figure is created.
 #show controls whether to display the plot immediately.
 #close controls whether to close the figure after plotting.
-def plot_graph(graph, ax=None, show=True, close=True):
+def plot_graph(G, ax=None, show=True, close=True):
     if ax is not None:
         ax.set_facecolor("black")
         ax.figure.set_facecolor("black")
     _, current_ax = ox.plot_graph(
-        graph,
-        node_size=[graph.nodes[node]["size"] for node in graph.nodes],
-        edge_color=[graph.edges[edge]["color"] for edge in graph.edges],
-        edge_alpha=[graph.edges[edge]["alpha"] for edge in graph.edges],
-        edge_linewidth=[graph.edges[edge]["linewidth"] for edge in graph.edges],
-        node_color="white",
+        G,
+        node_size=[G.nodes[node].get("size", 1) for node in G.nodes],
+        edge_color=[G.edges[edge]["color"] for edge in G.edges],
+        edge_alpha=[G.edges[edge]["alpha"] for edge in G.edges],
+        edge_linewidth=[G.edges[edge]["linewidth"] for edge in G.edges],
+        node_color=[G.nodes[node].get("color", "white") for node in G.nodes],
         bgcolor="black",
         ax=ax,
         show=show,
@@ -198,9 +211,9 @@ def astar(G, orig: int, dest: int, heuristic_type: str) -> Tuple[Optional[int], 
     print(f"Starting A* with {heuristic_type} heuristic from node {orig} to node {dest}")
 
     #origin and destination nodes styling
-    G.nodes[orig]["size"] = 60 
+    G.nodes[orig]["size"] = 100 
     G.nodes[orig]["color"] = "yellow"
-    G.nodes[dest]["size"] = 60 
+    G.nodes[dest]["size"] = 100
     G.nodes[dest]["color"] = "orange"
 
     for edge in G.edges:
@@ -253,10 +266,7 @@ def astar(G, orig: int, dest: int, heuristic_type: str) -> Tuple[Optional[int], 
 
     
 #generate random nodes as start and end points
-#optional seed parameter to ensure reproducibility of the random selection
-def generate_random_nodes(G, trials: int, seed: Optional[int] = None):
-    if seed is not None:
-        random.seed(seed)
+def generate_random_nodes(G, trials: int):
     nodes = list(G.nodes)   
     edges = []
     for _ in range(trials):
@@ -275,7 +285,7 @@ def build_astar_collage(G, edges, heuristic_type: str, show: bool = True, save_p
     axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
 
     for idx, (start_i, end_i) in enumerate(edges):
-        astar(G, start_i, end_i, heuristic_kind=heuristic_type)
+        astar(G, start_i, end_i, heuristic_type=heuristic_type)
         plot_graph(G, ax=axes[idx], show=False, close=False)
         axes[idx].set_title(f"{title_prefix} {idx + 1}", color="white", fontsize=10)
 
@@ -294,9 +304,9 @@ def build_astar_collage(G, edges, heuristic_type: str, show: bool = True, save_p
         plt.close(fig)
 
 # Soluzione 1: Sposta il parametro senza default all'inizio
-def run_astar(G, place_name: str, heuristic_type: str, num_trials: int = 10, seed: Optional[int] = 123):
+def run_astar(G, place_name: str, heuristic_type: str, num_trials: int = 10):
     graph = prepare_graph(place_name)
-    pairs = generate_random_nodes(G, num_trials=num_trials, seed=seed)
+    pairs = generate_random_nodes(G, num_trials=num_trials)
     iterations = []
 
     print("Running A*")
@@ -307,15 +317,15 @@ def run_astar(G, place_name: str, heuristic_type: str, num_trials: int = 10, see
     print("Heuristic:", heuristic_type)
 
     for i, (start, end) in enumerate(pairs, start=1):
-        it, _ = astar(graph, start, end, heuristic_kind=heuristic_type)
+        it, _ = astar(graph, start, end, heuristic_type=heuristic_type)
         iterations.append(it)
         print(f"Trial {i:2d} | start={start} end={end} | Iterations={it}")
 
     valid_iterations = [value for value in iterations if value is not None]
-    if valid_iterations:
+    if valid_iterations: 
         print("\nAverage iterations:", sum(valid_iterations) / len(valid_iterations))
 
-    build_astar_collage(graph, pairs, heuristic_kind=heuristic_type, show=True, save_path="collage_astar.png")
+    build_astar_collage(graph, pairs, heuristic_type=heuristic_type, show=True, save_path="collage_astar.png")
 
 
 if __name__ == "__main__":
@@ -324,17 +334,37 @@ if __name__ == "__main__":
     heuristics = ["Manhattan", "Euclidean", "Haversine"]
     trials = 10
     
+    os.makedirs("results", exist_ok=True)
+    convergence_data = np.zeros((3, 2))
+
+
     for city in cities:
         print(f"\n--- Analysis for: {city} ---")
         graph = prepare_graph(city)
-        pairs = generate_random_nodes(graph, trials=10, seed=123)
+        pairs = generate_random_nodes(graph, trials=10) 
         
         for h_type in heuristics:
             print(f"Executing A* with heuristic: {h_type}")
-            iterations = []
+            convergenceIterations = []
             for start, end in pairs:
                 it, _ = astar(graph, start, end, heuristic_type=h_type)
-                if it: iterations.append(it)
+                print(f"Start: {start}, End: {end}, Heuristic: {h_type}, Iterations: {it}")
+                if it: convergenceIterations.append(it) 
+                
+
             
-            avg = sum(iterations) / len(iterations) if iterations else 0
+            avg = sum(convergenceIterations) / len(convergenceIterations) if convergenceIterations else 0
             print(f"Average iterations ({h_type}): {avg:.2f}")
+            
+            heuristic_index = heuristics.index(h_type)
+            city_index = cities.index(city)
+            convergence_data[heuristic_index, city_index] = avg
+            
+            save_path = f"results/{city.replace(' ', '_').replace(',', '')}_{h_type}.png"
+            build_astar_collage(graph, pairs, heuristic_type=h_type, show=True, save_path=save_path)
+    
+    print("\nConvergence Data Matrix:")
+    print("Rows: Heuristics (Manhattan, Euclidean, Haversine)")
+    print("Columns: Cities (Turin, Aosta)")
+    print(convergence_data)
+
