@@ -1,0 +1,90 @@
+
+--- Analysis for: Turin, Piedmont, Italy ---
+Executing A* with heuristic: Manhattan
+Start: 495029555, End: 822630731, Cost: 607.450734, Iterations: 30601
+Start: 9799987948, End: 4106581809, Cost: 568.314109, Iterations: 13268
+Start: 2810831126, End: 752445435, Cost: 412.128211, Iterations: 9455
+Start: 473132378, End: 4562377734, Cost: 291.220039, Iterations: 11528
+Start: 441926176, End: 249569823, Cost: 134.910157, Iterations: 5352
+Start: 1075365161, End: 973862254, Cost: 708.682327, Iterations: 9374
+Start: 457509282, End: 2645172744, Cost: 293.577022, Iterations: 3377
+Start: 3278357811, End: 1962448454, Cost: 678.106398, Iterations: 12689
+Start: 823503948, End: 7153309995, Cost: 318.402123, Iterations: 3013
+Start: 1843752352, End: 4558140498, Cost: 1078.387179, Iterations: 43710
+AVG_ITERATIONS_ASTAR_Turin, Piedmont, Italy_Manhattan: 14236.70
+AVG_COST_ASTAR_Turin, Piedmont, Italy_Manhattan: 509.117830
+AVG_DISTANCE_ASTAR_Turin, Piedmont, Italy_Manhattan: 33.04
+Executing A* with heuristic: Euclidean
+Start: 495029555, End: 822630731, Cost: 607.450734, Iterations: 37468
+Start: 9799987948, End: 4106581809, Cost: 568.314109, Iterations: 17902
+Start: 2810831126, End: 752445435, Cost: 412.128211, Iterations: 11284
+Start: 473132378, End: 4562377734, Cost: 291.220039, Iterations: 14889
+Start: 441926176, End: 249569823, Cost: 134.910157, Iterations: 6250
+Start: 1075365161, End: 973862254, Cost: 708.682327, Iterations: 10798
+Start: 457509282, End: 2645172744, Cost: 293.577022, Iterations: 4422
+Start: 3278357811, End: 1962448454, Cost: 678.106398, Iterations: 14791
+Start: 823503948, End: 7153309995, Cost: 318.402123, Iterations: 3905
+Start: 1843752352, End: 4558140498, Cost: 1078.387179, Iterations: 46260
+AVG_ITERATIONS_ASTAR_Turin, Piedmont, Italy_Euclidean: 16796.90
+AVG_COST_ASTAR_Turin, Piedmont, Italy_Euclidean: 509.117830
+AVG_DISTANCE_ASTAR_Turin, Piedmont, Italy_Euclidean: 33.04
+Executing A* with heuristic: Haversine
+Start: 495029555, End: 822630731, Cost: 607.450734, Iterations: 37468
+Start: 9799987948, End: 4106581809, Cost: 568.314109, Iterations: 17902
+Start: 2810831126, End: 752445435, Cost: 412.128211, Iterations: 11284
+Start: 473132378, End: 4562377734, Cost: 291.220039, Iterations: 14889
+Start: 441926176, End: 249569823, Cost: 134.910157, Iterations: 6250
+Start: 1075365161, End: 973862254, Cost: 708.682327, Iterations: 10798
+Start: 457509282, End: 2645172744, Cost: 293.577022, Iterations: 4422
+Start: 3278357811, End: 1962448454, Cost: 678.106398, Iterations: 14791
+Start: 823503948, End: 7153309995, Cost: 318.402123, Iterations: 3905
+Start: 1843752352, End: 4558140498, Cost: 1078.387179, Iterations: 46260
+AVG_ITERATIONS_ASTAR_Turin, Piedmont, Italy_Haversine: 16796.90
+AVG_COST_ASTAR_Turin, Piedmont, Italy_Haversine: 509.117830
+AVG_DISTANCE_ASTAR_Turin, Piedmont, Italy_Haversine: 33.04
+
+--- Analysis for: Aosta, Aosta, Italy ---
+Executing A* with heuristic: Manhattan
+Start: 1741792501, End: 1262267449, Cost: 174.496731, Iterations: 102
+Start: 1743445882, End: 2014356988, Cost: 134.247402, Iterations: 175
+Start: 1367784634, End: 278913383, Cost: 21.790900, Iterations: 40
+Start: 9980206475, End: 340277537, Cost: 57.323081, Iterations: 37
+Start: 3796728576, End: 1743339183, Cost: 159.477803, Iterations: 640
+Start: 1741154960, End: 1367784634, Cost: 20.942418, Iterations: 56
+Start: 330605325, End: 1035811044, Cost: 160.128871, Iterations: 339
+Start: 9980206509, End: 1741154586, Cost: 65.554624, Iterations: 99
+Start: 307684204, End: 307681222, Cost: 38.493276, Iterations: 49
+Start: 1741787950, End: 307681300, Cost: 53.811376, Iterations: 67
+AVG_ITERATIONS_ASTAR_Aosta, Aosta, Italy_Manhattan: 160.40
+AVG_COST_ASTAR_Aosta, Aosta, Italy_Manhattan: 88.626648
+AVG_DISTANCE_ASTAR_Aosta, Aosta, Italy_Manhattan: 4.39
+Executing A* with heuristic: Euclidean
+Start: 1741792501, End: 1262267449, Cost: 174.496731, Iterations: 146
+Start: 1743445882, End: 2014356988, Cost: 133.066922, Iterations: 396
+Start: 1367784634, End: 278913383, Cost: 21.790900, Iterations: 41
+Start: 9980206475, End: 340277537, Cost: 55.889766, Iterations: 133
+Start: 3796728576, End: 1743339183, Cost: 159.477803, Iterations: 721
+Start: 1741154960, End: 1367784634, Cost: 20.942418, Iterations: 72
+Start: 330605325, End: 1035811044, Cost: 159.341223, Iterations: 387
+Start: 9980206509, End: 1741154586, Cost: 64.444175, Iterations: 283
+Start: 307684204, End: 307681222, Cost: 38.493276, Iterations: 81
+Start: 1741787950, End: 307681300, Cost: 53.811376, Iterations: 145
+AVG_ITERATIONS_ASTAR_Aosta, Aosta, Italy_Euclidean: 240.50
+AVG_COST_ASTAR_Aosta, Aosta, Italy_Euclidean: 88.175459
+AVG_DISTANCE_ASTAR_Aosta, Aosta, Italy_Euclidean: 4.38
+Executing A* with heuristic: Haversine
+Start: 1741792501, End: 1262267449, Cost: 174.496731, Iterations: 146
+Start: 1743445882, End: 2014356988, Cost: 133.066922, Iterations: 396
+Start: 1367784634, End: 278913383, Cost: 21.790900, Iterations: 41
+Start: 9980206475, End: 340277537, Cost: 55.889766, Iterations: 133
+Start: 3796728576, End: 1743339183, Cost: 159.477803, Iterations: 721
+Start: 1741154960, End: 1367784634, Cost: 20.942418, Iterations: 72
+Start: 330605325, End: 1035811044, Cost: 159.341223, Iterations: 387
+Start: 9980206509, End: 1741154586, Cost: 64.444175, Iterations: 283
+Start: 307684204, End: 307681222, Cost: 38.493276, Iterations: 81
+Start: 1741787950, End: 307681300, Cost: 53.811376, Iterations: 145
+AVG_ITERATIONS_ASTAR_Aosta, Aosta, Italy_Haversine: 240.50
+AVG_COST_ASTAR_Aosta, Aosta, Italy_Haversine: 88.175459
+AVG_DISTANCE_ASTAR_Aosta, Aosta, Italy_Haversine: 4.38
+
+Simulazione A* completata.

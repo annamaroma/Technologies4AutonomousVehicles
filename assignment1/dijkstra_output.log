@@ -1,0 +1,9 @@
+Loading graph for  Turin, Piedmont, Italy
+Running Dijkstra's algorithm on  Turin, Piedmont, Italy over 10 pairs of random nodes
+Running Dijkstra iteration 1: start=470010863 end=1182522802
+Traceback (most recent call last):
+  File "/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py", line 239, in <module>
+    steps, tempo, km = dijkstra(start, end)
+  File "/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py", line 88, in dijkstra
+    total_distance_km = reconstruct_path(orig, dest)
+TypeError: reconstruct_path() missing 1 required positional argument: 'dest'
