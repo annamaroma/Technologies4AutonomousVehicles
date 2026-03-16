@@ -1,0 +1,136 @@
+/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py:152: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py:152: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+Loading graph for  Turin, Piedmont, Italy
+Running Dijkstra's algorithm on  Turin, Piedmont, Italy over 10 pairs of random nodes
+Running Dijkstra iteration 1: start=474739781 end=5990480726
+Iterations to convergence: 67070
+total_cost_Dijkstra: 731.5106636481468
+Run 1 | Step: 67070 | Time: 731.5107 | KM Distance: 62.36 km
+Running Dijkstra iteration 2: start=4746785369 end=1334455109
+Iterations to convergence: 17875
+total_cost_Dijkstra: 244.8393006547408
+Run 2 | Step: 17875 | Time: 244.8393 | KM Distance: 17.07 km
+Running Dijkstra iteration 3: start=1301876318 end=1746420166
+Iterations to convergence: 71555
+total_cost_Dijkstra: 1247.5775368695865
+Run 3 | Step: 71555 | Time: 1247.5775 | KM Distance: 91.91 km
+Running Dijkstra iteration 4: start=4110431802 end=3214161788
+Iterations to convergence: 52516
+total_cost_Dijkstra: 971.9402941953691
+Run 4 | Step: 52516 | Time: 971.9403 | KM Distance: 53.92 km
+Running Dijkstra iteration 5: start=11716863440 end=749873214
+Iterations to convergence: 18995
+total_cost_Dijkstra: 253.74608328294013
+Run 5 | Step: 18995 | Time: 253.7461 | KM Distance: 12.62 km
+Running Dijkstra iteration 6: start=10965286066 end=5086673848
+Iterations to convergence: 73644
+total_cost_Dijkstra: 1321.0495400235918
+Run 6 | Step: 73644 | Time: 1321.0495 | KM Distance: 83.32 km
+Running Dijkstra iteration 7: start=1584087929 end=1550773254
+Iterations to convergence: 52201
+total_cost_Dijkstra: 567.344512047365
+Run 7 | Step: 52201 | Time: 567.3445 | KM Distance: 30.79 km
+Running Dijkstra iteration 8: start=607962125 end=982718376
+Iterations to convergence: 50909
+total_cost_Dijkstra: 631.2176236955592
+Run 8 | Step: 50909 | Time: 631.2176 | KM Distance: 37.30 km
+Running Dijkstra iteration 9: start=2250140191 end=3401832687
+Iterations to convergence: 62446
+total_cost_Dijkstra: 715.9176120839724
+Run 9 | Step: 62446 | Time: 715.9176 | KM Distance: 42.58 km
+Running Dijkstra iteration 10: start=2477105775 end=2107071934
+Iterations to convergence: 74731
+total_cost_Dijkstra: 1405.5118359615406
+Run 10 | Step: 74731 | Time: 1405.5118 | KM Distance: 87.54 km
+AVG_ITERATIONS_DIJKSTRA_Turin, Piedmont, Italy: 54194.20
+AVG_COST_DIJKSTRA_Turin, Piedmont, Italy: 809.065500
+AVG_DISTANCE_DIJKSTRA_Turin, Piedmont, Italy: 51.94
+Iterations to convergence: 67070
+total_cost_Dijkstra: 731.5106636481468
+Iterations to convergence: 17875
+total_cost_Dijkstra: 244.8393006547408
+Iterations to convergence: 71555
+total_cost_Dijkstra: 1247.5775368695865
+Iterations to convergence: 52516
+total_cost_Dijkstra: 971.9402941953691
+Iterations to convergence: 18995
+total_cost_Dijkstra: 253.74608328294013
+Iterations to convergence: 73644
+total_cost_Dijkstra: 1321.0495400235918
+Iterations to convergence: 52201
+total_cost_Dijkstra: 567.344512047365
+Iterations to convergence: 50909
+total_cost_Dijkstra: 631.2176236955592
+Iterations to convergence: 62446
+total_cost_Dijkstra: 715.9176120839724
+Iterations to convergence: 74731
+total_cost_Dijkstra: 1405.5118359615406
+Saved Dijkstra collage to results/Turin_Piedmont_Italy_dijkstra.png
+Loading graph for  Aosta, Aosta, Italy
+Running Dijkstra's algorithm on  Aosta, Aosta, Italy over 10 pairs of random nodes
+Running Dijkstra iteration 1: start=1767856776 end=1270190097
+Iterations to convergence: 575
+total_cost_Dijkstra: 54.963777761610565
+Run 1 | Step: 575 | Time: 54.9638 | KM Distance: 2.45 km
+Running Dijkstra iteration 2: start=1766516764 end=307684204
+Iterations to convergence: 379
+total_cost_Dijkstra: 44.39105780155847
+Run 2 | Step: 379 | Time: 44.3911 | KM Distance: 2.22 km
+Running Dijkstra iteration 3: start=1741154986 end=1270190115
+Iterations to convergence: 599
+total_cost_Dijkstra: 68.68436875838104
+Run 3 | Step: 599 | Time: 68.6844 | KM Distance: 3.13 km
+Running Dijkstra iteration 4: start=330602123 end=1270190115
+Iterations to convergence: 653
+total_cost_Dijkstra: 93.10002066351869
+Run 4 | Step: 653 | Time: 93.1000 | KM Distance: 4.66 km
+Running Dijkstra iteration 5: start=1741787475 end=307681224
+Iterations to convergence: 575
+total_cost_Dijkstra: 47.21035936530095
+Run 5 | Step: 575 | Time: 47.2104 | KM Distance: 2.36 km
+Running Dijkstra iteration 6: start=10827510644 end=3930545214
+Iterations to convergence: 331
+total_cost_Dijkstra: 36.4824944040371
+Run 6 | Step: 331 | Time: 36.4825 | KM Distance: 1.82 km
+Running Dijkstra iteration 7: start=321852979 end=1741155405
+Iterations to convergence: 273
+total_cost_Dijkstra: 84.91024513410458
+Run 7 | Step: 273 | Time: 84.9102 | KM Distance: 4.25 km
+Running Dijkstra iteration 8: start=1767856728 end=295092852
+Iterations to convergence: 531
+total_cost_Dijkstra: 59.95067952298138
+Run 8 | Step: 531 | Time: 59.9507 | KM Distance: 3.00 km
+Running Dijkstra iteration 9: start=8711815741 end=1741154986
+Iterations to convergence: 23
+total_cost_Dijkstra: 4.938341080314242
+Run 9 | Step: 23 | Time: 4.9383 | KM Distance: 0.25 km
+Running Dijkstra iteration 10: start=956917176 end=10013143968
+Iterations to convergence: 609
+total_cost_Dijkstra: 65.80538753405436
+Run 10 | Step: 609 | Time: 65.8054 | KM Distance: 3.29 km
+AVG_ITERATIONS_DIJKSTRA_Aosta, Aosta, Italy: 454.80
+AVG_COST_DIJKSTRA_Aosta, Aosta, Italy: 56.043673
+AVG_DISTANCE_DIJKSTRA_Aosta, Aosta, Italy: 2.74
+Iterations to convergence: 575
+total_cost_Dijkstra: 54.963777761610565
+Iterations to convergence: 379
+total_cost_Dijkstra: 44.39105780155847
+Iterations to convergence: 599
+total_cost_Dijkstra: 68.68436875838104
+Iterations to convergence: 653
+total_cost_Dijkstra: 93.10002066351869
+Iterations to convergence: 575
+total_cost_Dijkstra: 47.21035936530095
+Iterations to convergence: 331
+total_cost_Dijkstra: 36.4824944040371
+Iterations to convergence: 273
+total_cost_Dijkstra: 84.91024513410458
+Iterations to convergence: 531
+total_cost_Dijkstra: 59.95067952298138
+Iterations to convergence: 23
+total_cost_Dijkstra: 4.938341080314242
+Iterations to convergence: 609
+total_cost_Dijkstra: 65.80538753405436
+Saved Dijkstra collage to results/Aosta_Aosta_Italy_dijkstra.png
