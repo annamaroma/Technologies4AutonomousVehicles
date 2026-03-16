@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 import os 
 import numpy as np 
 
+# Set matplotlib to non-interactive backend to avoid display issues
+import matplotlib
+matplotlib.use('Agg')
+
 #maxspeed_handler normalize maxspeed values, converting them into consistent integers
 #in order to use the same unit of measure used in the Dijkstra algorithm, we check also that time is in millesimi di ora = sistance [km] / velocity [km/h] * 1000 
 
@@ -82,23 +86,32 @@ def reconstruct_path(G, orig: int, dest: int, algorithm: Optional[str] = None) -
     path = [dest]
     current = dest
 
-    distanc = 0
+    distance = 0.0
     while current != orig:
         previous = G.nodes[current]["previous"]
         if previous is None:
             print("No path found")
             return None
-        
-        style_path_edge(G, (previous, current, 0))
+
+        # get a valid edge key between the two nodes (MultiDiGraph may have multiple parallel edges)
+        edge_data = G.get_edge_data(previous, current)
+        if not edge_data:
+            print(f"No edge data found between {previous} and {current}")
+            return None
+        edge_key, edge_attr = next(iter(edge_data.items()))
+        edge_tuple = (previous, current, edge_key)
+
+        style_path_edge(G, edge_tuple)
         if algorithm:
             key = f"{algorithm}_uses"
-            G.edges[(previous, current, 0)][key] = G.edges[(previous, current, 0)].get(key, 0) + 1
+            G.edges[edge_tuple][key] = G.edges[edge_tuple].get(key, 0) + 1
+
+        distance += edge_attr.get("length", 0) / 1000  # distance in km
         path.append(previous)
         current = previous
-        distance += G.edges[(previous, current, 0)]["length"] / 1000 #distance in km
-    
+
     path.reverse()
-    return path
+    return distance
 
 #styling functions to visualize the graph
 #unvisited edge
@@ -210,7 +223,7 @@ def astar(G, orig: int, dest: int, heuristic_type: str) -> Tuple[Optional[int], 
     G.nodes[orig]["g_score"] = 0 #cost from start to start is 0
     h_n =heuristic_computation(G, orig, dest, heuristic_type) #f(n)= 0+h(n) for the start node is just the heuristic estimate to the goal
     G.nodes[orig]["f_score"] = h_n
-    print(f"Starting A* with {heuristic_type} heuristic from node {orig} to node {dest}")
+    #print(f"Starting A* with {heuristic_type} heuristic from node {orig} to node {dest}")
 
     #origin and destination nodes styling
     G.nodes[orig]["size"] = 100 
@@ -229,10 +242,10 @@ def astar(G, orig: int, dest: int, heuristic_type: str) -> Tuple[Optional[int], 
         _, node = heapq.heappop(pq)
         
         if node == dest:
-            print(f"A* {heuristic_type} terminato in {step} iterazioni")
+            #print(f"A* {heuristic_type} terminated in {step} iterations")
             total_distance_km = reconstruct_path(G, orig, dest, algorithm="Astar")
             total_cost_time = G.nodes[dest]["g_score"] 
-            print(f"total_cost_Astar: {total_cost_time}")
+            #print(f"total_cost_Astar: {total_cost_time}")
             return step, total_cost_time, total_distance_km
 
         if G.nodes[node]["visited"]:
