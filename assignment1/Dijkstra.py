@@ -7,6 +7,8 @@
 import osmnx as ox
 import random
 import heapq
+import matplotlib.pyplot as plt
+import os
 
 def style_unvisited_edge(edge):        
     G.edges[edge]["color"] = "gray"
@@ -28,18 +30,20 @@ def style_path_edge(edge):
     G.edges[edge]["alpha"] = 1
     G.edges[edge]["linewidth"] = 5
 
-def plot_graph():
+def plot_graph(ax=None, show=False, close=False):
     ox.plot_graph(
         G,
-        node_size =  [ G.nodes[node]["size"] for node in G.nodes ],
-        edge_color = [ G.edges[edge]["color"] for edge in G.edges ],
-        edge_alpha = [ G.edges[edge]["alpha"] for edge in G.edges ],
-        edge_linewidth = [ G.edges[edge]["linewidth"] for edge in G.edges ],
-        node_color = "white",
-        bgcolor = "black"
+        node_size=[G.nodes[node]["size"] for node in G.nodes],
+        edge_color=[G.edges[edge]["color"] for edge in G.edges],
+        edge_alpha=[G.edges[edge]["alpha"] for edge in G.edges],
+        edge_linewidth=[G.edges[edge]["linewidth"] for edge in G.edges],
+        node_color="white",
+        bgcolor="black",
+        ax=ax,
+        show=show,
+        close=close,
     )
-
-def dijkstra(orig, dest, plot=False):
+def dijkstra(orig, dest, plot=False) -> tuple[int, float, float]:
     # initialise node attributes
     for node in G.nodes:
         G.nodes[node]["visited"] = False
@@ -57,9 +61,16 @@ def dijkstra(orig, dest, plot=False):
     while pq:
         _, node = heapq.heappop(pq) #takes the node with the smallest distance from the priority queue
         if node == dest:
+        
             print("Iterations to convergence:", step)
+            # Questo è il costo minimo (tempo) trovato da Dijkstra
+            total_cost_time = G.nodes[dest]["distance"] 
+            print(f"total_cost_Dijkstra: {total_cost_time}") 
+            #reconstruct_path to find total distance in km
+            total_distance_km = reconstruct_path(orig, dest)
             #plot_graph()
-            return step
+            return step, total_cost_time, total_distance_km
+        
         if G.nodes[node]["visited"]:
             continue
         G.nodes[node]["visited"] = True
@@ -77,12 +88,12 @@ def dijkstra(orig, dest, plot=False):
                     style_active_edge((edge2[0], edge2[1], 0))
         step += 1
     # if destination wasn't reached, return final step count
-    return step
+    return step, None, None
 
 #reconstructs the final path from dest to origin using the "previous" attribute of each node, styles the path edges
 #increments the usage counter for each edge in the path. 
 #calculates the total distance of the path in kilometers.
-def reconstruct_path(orig, dest, plot=False, algorithm=None):
+def reconstruct_path(orig, dest, plot=False, algorithm=None)-> float:
     for edge in G.edges:
         style_unvisited_edge(edge)
     dist = 0
@@ -96,7 +107,39 @@ def reconstruct_path(orig, dest, plot=False, algorithm=None):
         if algorithm:
             G.edges[(prev, curr, 0)][f"{algorithm}_uses"] = G.edges[(prev, curr, 0)].get(f"{algorithm}_uses", 0) + 1
         curr = prev
-    dist /= 1000
+    distance_km = dist / 1000
+    return distance_km
+
+
+def build_dijkstra_collage(G, pairs, save_path: str):
+    columns = 5
+    rows = 2
+    fig, axes = plt.subplots(rows, columns, figsize=(24, 10))
+    axes = axes.flatten()
+
+    for i, (start, end) in enumerate(pairs):
+        for node in G.nodes:
+            G.nodes[node]["visited"] = False
+            G.nodes[node]["distance"] = float("inf")
+            G.nodes[node]["previous"] = None
+            G.nodes[node]["size"] = 0
+        for edge in G.edges:
+            style_unvisited_edge(edge)
+        G.nodes[start]["distance"] = 0
+        G.nodes[start]["size"] = 50
+        G.nodes[end]["size"] = 50
+
+        dijkstra(start, end)
+        reconstruct_path(start, end, algorithm="dijkstra")
+        plot_graph(ax=axes[i], show=False, close=False)
+        axes[i].set_title(f"Run {i+1}", color="white")
+
+    for j in range(len(pairs), len(axes)):
+        axes[j].axis("off")
+    fig.patch.set_facecolor("black")
+    plt.tight_layout()
+    fig.savefig(save_path, facecolor=fig.get_facecolor(), dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
 
 #metto in un vettore di stringhe le due città, una alla volta, e faccio il ciclo per entrambe
@@ -110,7 +153,7 @@ for city in cities:
 
     for edge in G.edges:
         # Cleaning the "maxspeed" attribute, some values are lists, some are strings, some are None
-        maxspeed = 40
+        maxspeed = 50
         if "maxspeed" in G.edges[edge]:
             maxspeed = G.edges[edge]["maxspeed"]
             if type(maxspeed) == list:
@@ -131,28 +174,38 @@ for city in cities:
     for edge in G.edges:
         G.edges[edge]["dijkstra_uses"] = 0
 
-    convergenceIterations = []
+    os.makedirs("results", exist_ok=True)
+
+    pairs = []
+    nodes = list(G.nodes)
+    for _ in range(10):
+        start = random.choice(nodes)
+        end = random.choice(nodes)
+        while end == start:
+            end = random.choice(nodes)
+        pairs.append((start, end))
 
     print("Running Dijkstra's algorithm on ", city, "over 10 pairs of random nodes")
-    for i in range(10):
-        print("Running Dijkstra, iteration ", i+1)
+    iterations = []
+    times = []
+    distances = []
+    for idx, (start, end) in enumerate(pairs, start=1):
+        print(f"Running Dijkstra iteration {idx}: start={start} end={end}")
+        steps, tempo, km = dijkstra(start, end)
+        print(f"Run {idx} | Step: {steps} | Time: {tempo:.4f} | KM Distance: {km:.2f} km")
+        iterations.append(steps)
+        times.append(tempo)
+        distances.append(km)
 
-        start = random.choice(list(G.nodes))
-        print("Start node: ", start)
-        end = random.choice(list(G.nodes))
-        print("End node: ", end)
+    avg_iterations = sum(iterations) / len(iterations) if iterations else 0
+    avg_time = sum(times) / len(times) if times else 0
+    avg_distance = sum(distances) / len(distances) if distances else 0
 
-        print("Nodes: ", len(G.nodes))
-        print("Edges: ", len(G.edges))
-        iterations = dijkstra(start, end)
-        convergenceIterations.append(iterations)
-        print( "Done for the", i+1, "iteration, reconstructing path and plotting graph" )
+    print(f"AVG_ITERATIONS_DIJKSTRA_{city}: {avg_iterations:.2f}")
+    print(f"AVG_COST_DIJKSTRA_{city}: {avg_time:.6f}")
+    print(f"AVG_DISTANCE_DIJKSTRA_{city}: {avg_distance:.2f}")
 
-        reconstruct_path(start, end, algorithm="dijkstra", plot=True)
-        plot_graph()
-
-    #calculate average iterations over 10 pairs of randomly selected points
-    avg_iterations = sum(convergenceIterations) / len(convergenceIterations)
-    print("Done running Dijkstra for ", city)
-    print("Average iterations to convergence over 10 runs:", avg_iterations)
+    save_path = f"results/{city.replace(' ', '_').replace(',', '')}_dijkstra.png"
+    build_dijkstra_collage(G, pairs, save_path=save_path)
+    print("Saved Dijkstra collage to", save_path)
     
