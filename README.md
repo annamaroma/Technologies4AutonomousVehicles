@@ -40,7 +40,7 @@ cd assignment1
 1. Activates the virtual environment.
 2. Runs Dijkstra and A* on the chosen node pairs.
 3. Stops early on errors to avoid inconsistent results.
-4. Validates A* performance against Dijkstra ground truth.
+4. Output files contain the log in case either of success and errors encourred during simulation.
 
 ---
 ## 📊 Expected Outputs
