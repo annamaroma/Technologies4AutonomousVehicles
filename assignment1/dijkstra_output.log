@@ -1,9 +1,56 @@
+/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py:186: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py:186: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
 Loading graph for  Turin, Piedmont, Italy
 Running Dijkstra's algorithm on  Turin, Piedmont, Italy over 10 pairs of random nodes
-Running Dijkstra iteration 1: start=470010863 end=1182522802
-Traceback (most recent call last):
-  File "/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py", line 239, in <module>
-    steps, tempo, km = dijkstra(start, end)
-  File "/home/anna/Desktop/Technologies4AutonomousVehicles/assignment1/Dijkstra.py", line 88, in dijkstra
-    total_distance_km = reconstruct_path(orig, dest)
-TypeError: reconstruct_path() missing 1 required positional argument: 'dest'
+Running Dijkstra iteration 1: start=495029555 end=822630731
+Run 1 | Step: 56416 | Time: 607.4507 | KM Distance: 44.24 km
+Running Dijkstra iteration 2: start=9799987948 end=4106581809
+Run 2 | Step: 52514 | Time: 568.3141 | KM Distance: 37.00 km
+Running Dijkstra iteration 3: start=2810831126 end=752445435
+Run 3 | Step: 34776 | Time: 412.1282 | KM Distance: 21.18 km
+Running Dijkstra iteration 4: start=473132378 end=4562377734
+Run 4 | Step: 27536 | Time: 291.2200 | KM Distance: 23.03 km
+Running Dijkstra iteration 5: start=441926176 end=249569823
+Run 5 | Step: 10230 | Time: 134.9102 | KM Distance: 6.75 km
+Running Dijkstra iteration 6: start=1075365161 end=973862254
+Run 6 | Step: 20613 | Time: 708.6823 | KM Distance: 38.96 km
+Running Dijkstra iteration 7: start=457509282 end=2645172744
+Run 7 | Step: 17585 | Time: 293.5770 | KM Distance: 21.75 km
+Running Dijkstra iteration 8: start=3278357811 end=1962448454
+Run 8 | Step: 20736 | Time: 678.1064 | KM Distance: 46.87 km
+Running Dijkstra iteration 9: start=823503948 end=7153309995
+Run 9 | Step: 6840 | Time: 318.4021 | KM Distance: 21.58 km
+Running Dijkstra iteration 10: start=1843752352 end=4558140498
+Run 10 | Step: 55134 | Time: 1078.3872 | KM Distance: 69.09 km
+AVG_ITERATIONS_DIJKSTRA_Turin, Piedmont, Italy: 30238.00
+AVG_COST_DIJKSTRA_Turin, Piedmont, Italy: 509.117830
+AVG_DISTANCE_DIJKSTRA_Turin, Piedmont, Italy: 33.04
+Saved Dijkstra collage to results/Turin_Piedmont_Italy_dijkstra.png
+Loading graph for  Aosta, Aosta, Italy
+Running Dijkstra's algorithm on  Aosta, Aosta, Italy over 10 pairs of random nodes
+Running Dijkstra iteration 1: start=1741792501 end=1262267449
+Run 1 | Step: 232 | Time: 174.4967 | KM Distance: 8.70 km
+Running Dijkstra iteration 2: start=1743445882 end=2014356988
+Run 2 | Step: 754 | Time: 133.0669 | KM Distance: 6.65 km
+Running Dijkstra iteration 3: start=1367784634 end=278913383
+Run 3 | Step: 178 | Time: 21.7909 | KM Distance: 1.09 km
+Running Dijkstra iteration 4: start=9980206475 end=340277537
+Run 4 | Step: 673 | Time: 55.8898 | KM Distance: 2.79 km
+Running Dijkstra iteration 5: start=3796728576 end=1743339183
+Run 5 | Step: 782 | Time: 159.4778 | KM Distance: 7.93 km
+Running Dijkstra iteration 6: start=1741154960 end=1367784634
+Run 6 | Step: 181 | Time: 20.9424 | KM Distance: 1.05 km
+Running Dijkstra iteration 7: start=330605325 end=1035811044
+Run 7 | Step: 659 | Time: 159.3412 | KM Distance: 7.74 km
+Running Dijkstra iteration 8: start=9980206509 end=1741154586
+Run 8 | Step: 519 | Time: 64.4442 | KM Distance: 3.22 km
+Running Dijkstra iteration 9: start=307684204 end=307681222
+Run 9 | Step: 476 | Time: 38.4933 | KM Distance: 1.92 km
+Running Dijkstra iteration 10: start=1741787950 end=307681300
+Run 10 | Step: 672 | Time: 53.8114 | KM Distance: 2.69 km
+AVG_ITERATIONS_DIJKSTRA_Aosta, Aosta, Italy: 512.60
+AVG_COST_DIJKSTRA_Aosta, Aosta, Italy: 88.175459
+AVG_DISTANCE_DIJKSTRA_Aosta, Aosta, Italy: 4.38
+Saved Dijkstra collage to results/Aosta_Aosta_Italy_dijkstra.png
