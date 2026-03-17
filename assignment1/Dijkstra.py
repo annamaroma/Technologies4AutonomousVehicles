@@ -85,7 +85,7 @@ def dijkstra(orig, dest, plot=False) -> tuple[int, float, float]:
             total_cost_time = G.nodes[dest]["distance"] 
             #print(f"total_cost_Dijkstra: {total_cost_time}") 
             #reconstruct_path to find total distance in km
-            total_distance_km = reconstruct_path(orig, dest)
+            total_distance_km = reconstruct_path(G, orig, dest)
             #plot_graph()
             return step, total_cost_time, total_distance_km
         
@@ -129,7 +129,7 @@ def reconstruct_path(G, orig: int, dest: int, algorithm: Optional[str] = None) -
             G.nodes[node]["color"] = "white"
 
     for edge in G.edges:
-        style_unvisited_edge(G, edge)
+        style_unvisited_edge(edge)
     
     path = [dest]
     current = dest
@@ -149,7 +149,7 @@ def reconstruct_path(G, orig: int, dest: int, algorithm: Optional[str] = None) -
         edge_key, edge_attr = next(iter(edge_data.items()))
         edge_tuple = (previous, current, edge_key)
 
-        style_path_edge(G, edge_tuple)
+        style_path_edge(edge_tuple)
         if algorithm:
             key = f"{algorithm}_uses"
             G.edges[edge_tuple][key] = G.edges[edge_tuple].get(key, 0) + 1
@@ -189,6 +189,8 @@ def build_dijkstra_collage(G, edges, show: bool = True, save_path: Optional[str]
 
 #metto in un vettore di stringhe le due città, una alla volta, e faccio il ciclo per entrambe
 cities = ["Turin, Piedmont, Italy", "Aosta, Aosta, Italy"]
+import random
+random.seed(42)  # Set a fixed seed for reproducibility
 
 for city in cities:
 
