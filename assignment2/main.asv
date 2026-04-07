@@ -44,7 +44,4 @@ area = [distAheadStart distAheadEnd -spaceToLeft spaceToRight];
 outImageSize = [NaN 400];
 
 %object birds eye
-birdsEye_object = birdsEyeView(sensor, area, outImageSize);
-
-%inverse perspective mapping
-BEV = transformImage(birdsEye_object, Ig);
+birdsEye = birdsEyeView(sensor, area, outImageSize);
