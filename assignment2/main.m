@@ -145,11 +145,50 @@ for i=1:num_files
     % 1. BEV on the current image
     BEV = transformImage(birdsEye_object, I);
 
+    [bev_h, bev_w, ~] = size(BEV);
+
+    obstacle_mask_bev = false(bev_h, bev_w);
+
+    for d = 1:size(YOLO_bboxes, 1)
+        box = YOLO_bboxes(d, :);
+
+        x1 = box(1);
+        y1 = box(2);
+        x2 = box(1) + box(3);
+        y2 = box(2) + box(4);
+
+        bbox_pts_img = [
+            x1 y1;
+            x2 y1;
+            x2 y2;
+            x1 y2
+        ];
+
+        bbox_pts_vehicle = imageToVehicle(sensor, bbox_pts_img);
+        valid = all(isfinite(bbox_pts_vehicle), 2);
+        bbox_pts_vehicle = bbox_pts_vehicle(valid, :);
+
+        if size(bbox_pts_vehicle,1) < 3
+            continue;
+        end
+
+        bbox_pts_bev = vehicleToImage(birdsEye_object, bbox_pts_vehicle);
+        valid = all(isfinite(bbox_pts_bev), 2);
+        bbox_pts_bev = bbox_pts_bev(valid, :);
+
+        if size(bbox_pts_bev,1) < 3
+            continue;
+        end
+
+        obstacle_mask_bev = obstacle_mask_bev | ...
+            poly2mask(bbox_pts_bev(:,1), bbox_pts_bev(:,2), bev_h, bev_w);
+    end
+
     %2. grayscale 
     BEV_gray = rgb2gray(BEV);
 
     %3. road mask : flag = 1 if pixel in the ROI AND is NOT black (0), flag = 0 otherwise
-    ROI_region_mask = (BEV_gray > 0) & bev_mask;
+    ROI_region_mask = (BEV_gray > 0) & bev_mask & ~obstacle_mask_bev;
 
     %4. noise reduction
     BEV_filtered = imgaussfilt(BEV_gray, 2);
@@ -200,44 +239,66 @@ for i=1:num_files
 
     % 7. Binarization
     BEV_binary = (BEV_enhanced >= Th) & ROI_region_mask;
+    BEV_binary = BEV_binary & ~obstacle_mask_bev;
 
     % 8. Remove small noisy components
     BEV_binary = bwareaopen(BEV_binary, 50);
 
+    
     % 9. Column histogram for lane localization
     % BEV_binary is a binary image where 1=lane and 0=background
     % I sum the columns of the binary image and visualize that sum on a histogram that should show the lines
-    h_bev = size(BEV_binary, 1); % in pixels, height of the BEV_image
-    start_row = round(h_bev * 0.5); % I don't want to consider all the binary image, only the half closer to the car
+    h_bev = size(BEV_binary, 1);
+    start_row = round(h_bev * 0.5);
 
-    %vector of all the sum of the columns
     histogram_columns_sum = sum(BEV_binary(start_row:end, :), 1);
 
-    midpoint = round(length(histogram_columns_sum)/2); %horizzontal centre of the histogram
-    margin = 50; %I don't want to consider picchi too close to the bordi
+    midpoint = round(length(histogram_columns_sum)/2);
+    margin = 50;
 
-    % find locL and locR, the horizzontal coordinates or Left and Right lanes
-    [maxL, locL_temp] = max(histogram_columns_sum(margin:midpoint));
-    locL = locL_temp + margin - 1;
-
-    [maxR, locR_temp] = max(histogram_columns_sum(midpoint+1:end-margin));
-    locR = locR_temp + midpoint;
-
-    % threshold to decide whether a lane is present
+    % thresholds to decide whether a lane is present
     analyzed_height = h_bev - start_row + 1;
+    dashedThreshold = max(20, round(0.07 * analyzed_height));
+    solidThreshold  = max(40, round(0.20 * analyzed_height));
+
+    % find locL and locR, the horizontal coordinates of left and right lanes
+    leftHist  = histogram_columns_sum(margin:midpoint);
+    rightHist = histogram_columns_sum(midpoint+1:end-margin);
+
+    % find lane candidates as peaks in the histogram
+    [leftPeaks, leftLocs] = findpeaks(leftHist, ...
+        'MinPeakHeight', dashedThreshold, ...
+        'MinPeakDistance', 60);
+
+    [rightPeaks, rightLocs] = findpeaks(rightHist, ...
+        'MinPeakHeight', dashedThreshold, ...
+        'MinPeakDistance', 60);
+
+    maxL = 0;
+    maxR = 0;
+    locL = NaN;
+    locR = NaN;
+
+    if ~isempty(leftPeaks)
+        [maxL, idxL] = max(leftPeaks);
+        locL = leftLocs(idxL) + margin - 1;
+    end
+
+    if ~isempty(rightPeaks)
+        [maxR, idxR] = max(rightPeaks);
+        locR = rightLocs(idxR) + midpoint;
+    end
+
+    y_bev = (1:size(BEV_binary,1))';
 
     % dashed lines _ _ _ _ _  or solid ______________ ??
-    y_bev = (1:size(BEV_binary,1))'; %vector of the y coordinates in the BEV image
-    dashedThreshold = round(analyzed_height * 0.11); %un picco deve essere abbastanza alto per essere considerato una lane reale
-    solidThreshold = round(analyzed_height * 0.33); 
-
-    left_found  = false;
+    left_found = false;
     if maxL > dashedThreshold
         left_found = true;
-        left_type = "dashed"; %default _ _ _ _ _ 
+        left_type = "dashed";
         color_left = 'g';
         if maxL > solidThreshold
-            left_type = "solid"; %if histogram max is very high, it's ______________________
+            left_type = "solid";
             color_left = 'b';
         end
         bev_points_left = [repmat(locL, size(y_bev)), y_bev];
@@ -248,17 +309,16 @@ for i=1:num_files
     right_found = false;
     if maxR > dashedThreshold
         right_found = true;
-        right_type = "dashed"; %default - - - -
+        right_type = "dashed";
         color_right = 'g';
         if maxR > solidThreshold
-            right_type = "solid"; 
+            right_type = "solid";
             color_right = 'b';
         end
         bev_points_right = [repmat(locR, size(y_bev)), y_bev];
         vehicle_points_right = imageToVehicle(birdsEye_object, bev_points_right);
         image_points_right = vehicleToImage(sensor, vehicle_points_right);
     end
-
 
     %% VISUALIZATION
     fig = figure(1); clf;
