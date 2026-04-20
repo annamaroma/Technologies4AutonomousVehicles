@@ -3,7 +3,13 @@ clear; clc; close all
 % Anna Roma
 % Assignment 2 - Line Detection using GOLD Lane Detection Algorithm
 
-search_path = 'archive/044/camera/front_camera/*.jpg';
+% Visualization tuning for narrow BEV subplots
+roiLineWidth = 0.75;
+laneLineWidth = 1.0;
+histLineWidth = 0.75;
+peakLineWidth = 0.75;
+
+search_path = 'archive/front_camera_46/*.jpg';
 
 scriptDir = fileparts(mfilename('fullpath'));
 resolved_search_path = resolveSearchPath(search_path, scriptDir);
@@ -53,14 +59,16 @@ Intrinsics = cameraIntrinsics(focalLength, principalPoint, [imageSize(2) imageSi
 sensor = monoCamera(Intrinsics, height, 'Pitch', pitch);
 
 %define area to see with BEV [meters]
-distAheadStart = 3;
-distAheadEnd   = 30;
-spaceToLeft    = 6;
-spaceToRight   = 6;
+% Keep a slightly wider longitudinal span and a more compact output width:
+% these settings produce a less distorted BEV on the provided test frames.
+distAheadStart = 5;
+distAheadEnd   = 40;
+spaceToLeft    = 5;
+spaceToRight   = 5;
 area = [distAheadStart distAheadEnd -spaceToLeft spaceToRight];
 
 %define BEV resolution
-outImageSize = [NaN 800];
+outImageSize = [NaN 400];
 
 %object birds eye
 birdsEye_object = birdsEyeView(sensor, area, outImageSize);
@@ -95,6 +103,7 @@ BEV0 = transformImage(birdsEye_object, I0); %apply BEV to the first image
 roi_vehicle = imageToVehicle(sensor, [roi_X', roi_Y']); %convert the 4 vertices of the ROI trapezio (x,y pixels) in the vehicle coordinates
 roi_bev = vehicleToImage(birdsEye_object, roi_vehicle); %convert the 4 vertices of the ROI trapezio (x,y in vehicle coordinates) in the BEV image coordinates (x,y pixels)
 bev_mask = poly2mask(roi_bev(:,1), roi_bev(:,2), bev_h, bev_w); %create the binary mask, gives 1 if inside ROI, 0 if outside the trapezio
+roi_bev_boundary = maskToBoundary(bev_mask);
 
 test_idx = [1 10 20 30 40];
 test_idx = test_idx(test_idx <= num_files);
@@ -112,22 +121,22 @@ for k = 1:length(test_idx)
     imshow(I);
     title(sprintf('Original image %d', idx));
     hold on;
-    plot([roi_X roi_X(1)], [roi_Y roi_Y(1)], 'r-', 'LineWidth', 2);
+    plot([roi_X roi_X(1)], [roi_Y roi_Y(1)], 'r-', 'LineWidth', roiLineWidth);
     hold off;
 
     subplot(1,2,2);
     imshow(BEV_gray);
     title(sprintf('BEV image %d', idx));
     hold on;
-    plot([roi_bev(:,1); roi_bev(1,1)], [roi_bev(:,2); roi_bev(1,2)], 'g-', 'LineWidth', 2);
+    plotLane(roi_bev_boundary, 'g', roiLineWidth);
     hold off;
 end
 
 
-%% YOLO DETECTOR
+%% OBSTACLE DETECTOR
 YOLOScoreThreshold = 0.35;
-YOLODetector = yolov4ObjectDetector("tiny-yolov4-coco");
-allowedObstacleLabels = ["car","truck","bus","motorcycle","bicycle","person"];
+[obstacleDetector, detectorMode] = initializeObstacleDetector();
+allowedObstacleLabels = ["car","truck","bus","motorcycle","bicycle","person","vehicle"];
 
 
 %% TEMPORARY MEMORY FOR LAST VALID LANES
@@ -144,9 +153,9 @@ for i=1:num_files
     I = imread(fullfile(files(i).folder, files(i).name));
     fprintf('Processing image %d/%d: %s\n', i, num_files, files(i).name);
 
-    % 0. YOLO detection for cars and people on the original image
-    [YOLO_bboxes, YOLO_scores, YOLO_labels] = detect(YOLODetector, I, ...
-        'Threshold', YOLOScoreThreshold);
+    % 0. Obstacle detection on the original image
+    [YOLO_bboxes, YOLO_scores, YOLO_labels] = detectObstacles( ...
+        obstacleDetector, detectorMode, I, YOLOScoreThreshold);
 
     % Keep only obstacle classes inside the road ROI
     [YOLO_bboxes, YOLO_scores, YOLO_labels] = ...
@@ -177,6 +186,15 @@ for i=1:num_files
             x1 y2
         ];
 
+        % Some detector boxes can extend slightly outside the camera image.
+        % Clamp them before projecting to vehicle coordinates.
+        bbox_pts_img(:,1) = min(max(bbox_pts_img(:,1), 1), size(I,2));
+        bbox_pts_img(:,2) = min(max(bbox_pts_img(:,2), 1), size(I,1));
+
+        if size(unique(round(bbox_pts_img), 'rows'), 1) < 3
+            continue;
+        end
+
         bbox_pts_vehicle = imageToVehicle(sensor, bbox_pts_img);
         valid = all(isfinite(bbox_pts_vehicle), 2);
         bbox_pts_vehicle = bbox_pts_vehicle(valid, :);
@@ -190,6 +208,16 @@ for i=1:num_files
         bbox_pts_bev = bbox_pts_bev(valid, :);
 
         if size(bbox_pts_bev,1) < 3
+            continue;
+        end
+
+        % Projected obstacle polygons can land far outside the BEV image on
+        % some frames. Clip them before rasterization so poly2mask does not
+        % fail on extreme vertices.
+        bbox_pts_bev(:,1) = min(max(bbox_pts_bev(:,1), 1), bev_w);
+        bbox_pts_bev(:,2) = min(max(bbox_pts_bev(:,2), 1), bev_h);
+
+        if size(unique(round(bbox_pts_bev), 'rows'), 1) < 3
             continue;
         end
 
@@ -396,14 +424,14 @@ for i=1:num_files
     hold on;
 
     % Draw ROI on original image
-    plot([roi_X roi_X(1)], [roi_Y roi_Y(1)], 'r-', 'LineWidth', 2);
+    plot([roi_X roi_X(1)], [roi_Y roi_Y(1)], 'r-', 'LineWidth', roiLineWidth);
 
     % Draw left and right lanes on original image
     if display_left_found
-        plotLane(image_points_left_display, display_color_left, 2);
+        plotLane(image_points_left_display, display_color_left, laneLineWidth);
     end
     if display_right_found
-        plotLane(image_points_right_display, display_color_right, 2);
+        plotLane(image_points_right_display, display_color_right, laneLineWidth);
     end
 
     if ~display_left_found && ~display_right_found
@@ -456,15 +484,16 @@ for i=1:num_files
     imshow(BEV_gray);
     title('BEV grayscale');
     hold on;
+    plotLane(roi_bev_boundary, 'c', roiLineWidth);
 
     if display_left_found
-        plotLane(bev_points_left_display, display_color_left, 2);
+        plotLane(bev_points_left_display, display_color_left, laneLineWidth);
         text(display_locL + 8, 35, char(display_left_type), ...
             'Color', display_color_left, 'FontSize', 10, 'FontWeight', 'bold');
     end
 
     if display_right_found
-        plotLane(bev_points_right_display, display_color_right, 2);
+        plotLane(bev_points_right_display, display_color_right, laneLineWidth);
         text(display_locR + 8, 70, char(display_right_type), ...
             'Color', display_color_right, 'FontSize', 10, 'FontWeight', 'bold');
     end
@@ -497,12 +526,12 @@ for i=1:num_files
     title('Binary BEV');
 
     subplot(2,3,6);
-    plot(histogram_columns_sum, 'LineWidth', 1.5);
+    plot(histogram_columns_sum, 'LineWidth', histLineWidth);
     title('Column histogram');
     grid on;
     hold on;
-    if display_left_found,  xline(display_locL, 'g', 'LineWidth', 2); end
-    if display_right_found, xline(display_locR, 'g', 'LineWidth', 2); end
+    if display_left_found,  xline(display_locL, 'g', 'LineWidth', peakLineWidth); end
+    if display_right_found, xline(display_locR, 'g', 'LineWidth', peakLineWidth); end
     hold off;
 
     sgtitle(sprintf('Lane detection pipeline - %s', files(i).name), 'Interpreter', 'none');
@@ -597,7 +626,27 @@ end
 
 function lane_type = classifyLaneType(supportMask, startRow, solidThreshold)
     supportSlice = supportMask(startRow:end);
-    if nnz(supportSlice) >= solidThreshold
+
+    if ~any(supportSlice)
+        lane_type = "dashed";
+        return;
+    end
+
+    supportLength = numel(supportSlice);
+    coverageRatio = nnz(supportSlice) / supportLength;
+
+    % Measure continuity instead of only counting total supporting rows:
+    % dashed lanes can still have many active rows, but broken into short runs.
+    paddedSlice = [false; supportSlice(:); false];
+    runStarts = find(diff(paddedSlice) == 1);
+    runEnds = find(diff(paddedSlice) == -1) - 1;
+    runLengths = runEnds - runStarts + 1;
+    longestRun = max(runLengths);
+
+    minCoverageForSolid = 0.55;
+    minLongestRunForSolid = max(solidThreshold, round(0.35 * supportLength));
+
+    if coverageRatio >= minCoverageForSolid && longestRun >= minLongestRunForSolid
         lane_type = "solid";
     else
         lane_type = "dashed";
@@ -618,7 +667,96 @@ function image_points = bevToImagePoints(bev_points, birdsEye_object, sensor)
 end
 
 function plotLane(points, laneColor, lineWidth)
+    if isempty(points) || size(points, 1) == 0
+        return;
+    end
+
+    if ~any(all(isfinite(points), 2))
+        return;
+    end
+
+    % Keep NaNs so MATLAB breaks the polyline into visible dashed segments
+    % instead of connecting separate detections into one solid line.
     plot(points(:,1), points(:,2), 'Color', laneColor, 'LineWidth', lineWidth);
+end
+
+function boundary_points = maskToBoundary(binaryMask)
+    boundaries = bwboundaries(binaryMask, 'noholes');
+
+    if isempty(boundaries)
+        boundary_points = nan(0, 2);
+        return;
+    end
+
+    lengths = cellfun(@(b) size(b, 1), boundaries);
+    [~, idx] = max(lengths);
+    boundary_rc = boundaries{idx};
+    boundary_points = [boundary_rc(:,2), boundary_rc(:,1)];
+end
+
+function [detector, mode] = initializeObstacleDetector()
+    detector = struct();
+    mode = "none";
+
+    try
+        detector.model = yolov4ObjectDetector("tiny-yolov4-coco");
+        mode = "yolo";
+        fprintf('Obstacle detector: YOLO v4 tiny COCO\n');
+        return;
+    catch ME
+        warning(['YOLO disabled: %s\n', ...
+            'Falling back to ACF vehicle/person detectors.\n', ...
+            'Install the Computer Vision Toolbox Model for YOLO v4 Object Detection ', ...
+            'support package from MATLAB Add-On Explorer to re-enable YOLO.'], ...
+            ME.message);
+    end
+
+    try
+        detector.vehicle = vehicleDetectorACF('front-rear-view');
+        detector.person = peopleDetectorACF('caltech-50x21');
+        mode = "acf";
+        fprintf('Obstacle detector: ACF fallback (vehicles + people)\n');
+    catch ME
+        warning(['ACF fallback disabled: %s\n', ...
+            'Obstacle detection will remain unavailable on this MATLAB setup.'], ...
+            ME.message);
+    end
+end
+
+function [bboxes, scores, labels] = detectObstacles(detector, mode, I, yoloThreshold)
+    bboxes = zeros(0, 4);
+    scores = zeros(0, 1);
+    labels = strings(0, 1);
+
+    switch string(mode)
+        case "yolo"
+            [bboxes, scores, labels] = detect(detector.model, I, ...
+                'Threshold', yoloThreshold);
+
+        case "acf"
+            [vehicleBboxes, vehicleScores] = detect(detector.vehicle, I);
+            if ~isempty(vehicleBboxes)
+                vehicleBboxes = selectStrongestBbox(vehicleBboxes, vehicleScores, ...
+                    'OverlapThreshold', 0.5);
+                numVehicles = size(vehicleBboxes, 1);
+                bboxes = [bboxes; vehicleBboxes];
+                scores = [scores; ones(numVehicles, 1)];
+                labels = [labels; repmat("vehicle", numVehicles, 1)];
+            end
+
+            [peopleBboxes, peopleScores] = detect(detector.person, I);
+            if ~isempty(peopleBboxes)
+                peopleBboxes = selectStrongestBbox(peopleBboxes, peopleScores, ...
+                    'OverlapThreshold', 0.5);
+                numPeople = size(peopleBboxes, 1);
+                bboxes = [bboxes; peopleBboxes];
+                scores = [scores; ones(numPeople, 1)];
+                labels = [labels; repmat("person", numPeople, 1)];
+            end
+
+        otherwise
+            % Leave outputs empty when no detector is available.
+    end
 end
 
 function [filtered_bboxes, filtered_scores, filtered_labels] = ...
@@ -633,11 +771,24 @@ function [filtered_bboxes, filtered_scores, filtered_labels] = ...
 
     keep = false(size(bboxes,1),1);
 
+    normalizedAllowedLabels = lower(string(allowedLabels));
+
     for k = 1:size(bboxes,1)
-        x_center = bboxes(k,1) + bboxes(k,3)/2;
-        y_center = bboxes(k,2) + bboxes(k,4)/2;
-        label_ok = any(strcmpi(string(labels(k)), allowedLabels));
-        keep(k) = label_ok && isinterior(roi_poly, x_center, y_center);
+        box = bboxes(k, :);
+        label = lower(strtrim(string(labels(k))));
+
+        % YOLO boxes for distant obstacles often have a center above the ROI
+        % even when the object is clearly on the road. Use bottom support
+        % points instead of the box center to keep road users touching the road.
+        probePoints = [
+            box(1) + box(3) / 2, box(2) + box(4);   % bottom center
+            box(1),              box(2) + box(4);   % bottom left
+            box(1) + box(3),     box(2) + box(4)    % bottom right
+        ];
+
+        label_ok = any(strcmpi(label, normalizedAllowedLabels));
+        in_roi = any(isinterior(roi_poly, probePoints(:,1), probePoints(:,2)));
+        keep(k) = label_ok && in_roi;
     end
 
     filtered_bboxes = bboxes(keep, :);
