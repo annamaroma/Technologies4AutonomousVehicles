@@ -3,18 +3,19 @@ clear; clc; close all
 % Anna Roma
 % Assignment 2 - Line Detection using GOLD Lane Detection Algorithm
 
-% archive path : could change depending on where the archive is locally stored
-archive_path = 'archive/044/camera/front_camera/*.jpg';
-files = dir(archive_path);
+search_path = 'archive/044/camera/front_camera/*.jpg';
+
+scriptDir = fileparts(mfilename('fullpath'));
+resolved_search_path = resolveSearchPath(search_path, scriptDir);
+files = dir(resolved_search_path);
 num_files = length(files);
 if isempty(files)
-    error('No images found on: %s', archive_path);
+    error('No images found on: %s', resolved_search_path);
 else
-    fprintf('Found %d images on: %s\n', num_files, archive_path);
+    fprintf('Found %d images on: %s\n', num_files, resolved_search_path);
 end
 
 %% OUTPUT FOLDER
-scriptDir = fileparts(mfilename('fullpath'));
 resultsDir = fullfile(scriptDir, 'results');
 
 if exist(resultsDir, 'dir')
@@ -96,6 +97,7 @@ roi_bev = vehicleToImage(birdsEye_object, roi_vehicle); %convert the 4 vertices 
 bev_mask = poly2mask(roi_bev(:,1), roi_bev(:,2), bev_h, bev_w); %create the binary mask, gives 1 if inside ROI, 0 if outside the trapezio
 
 test_idx = [1 10 20 30 40];
+test_idx = test_idx(test_idx <= num_files);
 for k = 1:length(test_idx)
     idx = test_idx(k);
     I = imread(fullfile(files(idx).folder, files(idx).name));
@@ -123,9 +125,19 @@ end
 
 
 %% YOLO DETECTOR
-YOLODetector = yolov4ObjectDetector("tiny-yolov4-coco");
 YOLOScoreThreshold = 0.35;
+YOLODetector = yolov4ObjectDetector("tiny-yolov4-coco");
+allowedObstacleLabels = ["car","truck","bus","motorcycle","bicycle","person"];
 
+
+%% TEMPORARY MEMORY FOR LAST VALID LANES
+maxMemoryFrames = 5; missedFrames = 0;
+last_left_found = false; last_right_found = false;
+last_locL = NaN; last_locR = NaN;
+last_left_type = ""; last_right_type = "";
+last_color_left = 'g'; last_color_right = 'g';
+last_left_lane_bev = nan(0, 2);
+last_right_lane_bev = nan(0, 2);
 
 %% PIPELINE LANE DETECTION
 for i=1:num_files
@@ -136,9 +148,10 @@ for i=1:num_files
     [YOLO_bboxes, YOLO_scores, YOLO_labels] = detect(YOLODetector, I, ...
         'Threshold', YOLOScoreThreshold);
 
-    % Keep only detections inside the road ROI
+    % Keep only obstacle classes inside the road ROI
     [YOLO_bboxes, YOLO_scores, YOLO_labels] = ...
-        filterBBoxesByROI(YOLO_bboxes, YOLO_scores, YOLO_labels, roi_poly);
+        filterObstacleDetections(YOLO_bboxes, YOLO_scores, YOLO_labels, ...
+        roi_poly, allowedObstacleLabels);
 
 
 
@@ -196,50 +209,20 @@ for i=1:num_files
     %5. lane enhancement : use a kernel to enhance the lane lines, which are vertical in the BEV
     BEV_enhanced = imtophat(BEV_filtered, strel('rectangle', [1 15]));
 
-    % 6. Find the threshold 
-    % choose a iterative thresholding method because 
-    valid_pixels = double(BEV_enhanced(ROI_region_mask));
+    % 6. Find two separate thresholds, one for each half of the image
+    split_col = round(bev_w / 2);
+    left_half_mask = ROI_region_mask;
+    left_half_mask(:, split_col+1:end) = false;
+    right_half_mask = ROI_region_mask;
+    right_half_mask(:, 1:split_col) = false;
 
-    if isempty(valid_pixels)
-        Th = 50;
-    else
-        %set initial threshold
-        Th = (max(valid_pixels) + min(valid_pixels)) / 2;
-        Th_old = 0;
+    leftThreshold = computeIterativeThreshold(BEV_enhanced, left_half_mask, 50);
+    rightThreshold = computeIterativeThreshold(BEV_enhanced, right_half_mask, 50);
 
-        %repeat util convergence, i.e. until the change in threshold is less than 0.5
-        %my goal is to find a Th stabile and optimum to the image
-        while abs(Th - Th_old) > 0.5
-            Th_old = Th;
-
-            %divide pixels in the vector in 2 groups:
-        % - group A: pixels with intensity >= Th threshold  + brillanti
-        % - group B: pixels with intensity < Th threshold   + scuri
-            groupA = valid_pixels(valid_pixels >= Th);
-            groupB = valid_pixels(valid_pixels < Th);
-
-            %calculate mean for each group 
-            if isempty(groupA)
-                meanA = Th;
-            else
-                meanA = mean(groupA);
-            end
-
-            if isempty(groupB)
-                meanB = Th;
-            else
-                meanB = mean(groupB);
-            end
-
-            % update threshold as the average od the 2 means
-            % new Th is halfway between the mean of pixel + scuri and the mean of pixel + brillanti
-            Th = (meanA + meanB) / 2;
-        end
-    end
-
-    % 7. Binarization
-    BEV_binary = (BEV_enhanced >= Th) & ROI_region_mask;
-    BEV_binary = BEV_binary & ~obstacle_mask_bev;
+    % 7. Binarization with half-specific thresholds
+    BEV_binary_left = (BEV_enhanced >= leftThreshold) & left_half_mask;
+    BEV_binary_right = (BEV_enhanced >= rightThreshold) & right_half_mask;
+    BEV_binary = BEV_binary_left | BEV_binary_right;
 
     % 8. Remove small noisy components
     BEV_binary = bwareaopen(BEV_binary, 50);
@@ -289,38 +272,121 @@ for i=1:num_files
         locR = rightLocs(idxR) + midpoint;
     end
 
-    y_bev = (1:size(BEV_binary,1))';
+    laneSearchHalfWidth = 35;
 
     % dashed lines _ _ _ _ _  or solid ______________ ??
     left_found = false;
     if maxL > dashedThreshold
-        left_found = true;
-        left_type = "dashed";
-        color_left = 'g';
-        if maxL > solidThreshold
-            left_type = "solid";
-            color_left = 'b';
+        candidate_left_lane_bev = traceLaneFromBinary(BEV_binary, locL, laneSearchHalfWidth, [1 midpoint]);
+        left_support_mask = isfinite(candidate_left_lane_bev(:,1));
+        if nnz(left_support_mask(start_row:end)) >= dashedThreshold
+            left_found = true;
+            left_lane_bev = candidate_left_lane_bev;
+            left_type = classifyLaneType(left_support_mask, start_row, solidThreshold);
+            color_left = 'g';
+            valid_left_bottom = left_lane_bev(start_row:end,1);
+            locL = round(median(valid_left_bottom(isfinite(valid_left_bottom))));
         end
-        bev_points_left = [repmat(locL, size(y_bev)), y_bev];
-        vehicle_points_left = imageToVehicle(birdsEye_object, bev_points_left);
-        image_points_left = vehicleToImage(sensor, vehicle_points_left);
     end
 
     right_found = false;
     if maxR > dashedThreshold
-        right_found = true;
-        right_type = "dashed";
-        color_right = 'g';
-        if maxR > solidThreshold
-            right_type = "solid";
-            color_right = 'b';
+        candidate_right_lane_bev = traceLaneFromBinary(BEV_binary, locR, laneSearchHalfWidth, [midpoint+1 bev_w]);
+        right_support_mask = isfinite(candidate_right_lane_bev(:,1));
+        if nnz(right_support_mask(start_row:end)) >= dashedThreshold
+            right_found = true;
+            right_lane_bev = candidate_right_lane_bev;
+            right_type = classifyLaneType(right_support_mask, start_row, solidThreshold);
+            color_right = 'g';
+            valid_right_bottom = right_lane_bev(start_row:end,1);
+            locR = round(median(valid_right_bottom(isfinite(valid_right_bottom))));
         end
-        bev_points_right = [repmat(locR, size(y_bev)), y_bev];
-        vehicle_points_right = imageToVehicle(birdsEye_object, bev_points_right);
-        image_points_right = vehicleToImage(sensor, vehicle_points_right);
     end
 
+    %% MEMORY MANAGEMENT
+    detected_now = left_found || right_found;
+    if detected_now % I have detected lines in the current frame
+        missedFrames = 0; % update memory with current valid detections
+        last_left_found = left_found;
+        last_right_found = right_found;
+        if left_found
+            last_locL = locL;
+            last_left_type = left_type;
+            last_color_left = color_left;
+            last_left_lane_bev = left_lane_bev;
+        end
+        if right_found
+            last_locR = locR;
+            last_right_type = right_type;
+            last_color_right = color_right;
+            last_right_lane_bev = right_lane_bev;
+        end
+    else % I have not detected any line in the current frame
+        missedFrames = missedFrames + 1;
+    end
+
+    % decide what to display:
+    % use memory if I have not detected any lines AND  I am still in the memory window AND really exists a valid old line saved
+    use_memory = ~detected_now && (missedFrames <= maxMemoryFrames) && ...
+                 (last_left_found || last_right_found);
+
+    if use_memory %no lanes fouund, visualize the last valid lanes found in the memory
+        display_left_found = last_left_found;
+        display_right_found = last_right_found;
+
+        display_locL = last_locL;
+        display_locR = last_locR;
+
+        display_left_type = last_left_type;
+        display_right_type = last_right_type;
+
+        display_color_left = last_color_left;
+        display_color_right = last_color_right;
+        display_left_lane_bev = last_left_lane_bev;
+        display_right_lane_bev = last_right_lane_bev;
+    else % not using memory, visualize the current detections
+        display_left_found = left_found;
+        display_right_found = right_found;
+
+        if left_found % if i have found a left line in current frame, I visualize it
+            display_locL = locL;
+            display_left_type = left_type;
+            display_color_left = color_left;
+            display_left_lane_bev = left_lane_bev;
+        else %if not, I visualize nothing (NAN) and I will write "no lane found" on the image
+            display_locL = NaN;
+            display_left_type = "";
+            display_color_left = 'g';
+            display_left_lane_bev = nan(0, 2);
+        end
+
+        if right_found
+            display_locR = locR;
+            display_right_type = right_type;
+            display_color_right = color_right;
+            display_right_lane_bev = right_lane_bev;
+        else
+            display_locR = NaN;
+            display_right_type = "";
+            display_color_right = 'g';
+            display_right_lane_bev = nan(0, 2);
+        end
+    end
+
+
+
     %% VISUALIZATION
+    % Build lane points for visualization using display variables
+    if display_left_found
+        bev_points_left_display = display_left_lane_bev;
+        image_points_left_display = bevToImagePoints(bev_points_left_display, birdsEye_object, sensor);
+    end
+
+    if display_right_found
+        bev_points_right_display = display_right_lane_bev;
+        image_points_right_display = bevToImagePoints(bev_points_right_display, birdsEye_object, sensor);
+    end
+
     fig = figure(1); clf;
     set(fig, 'Position', [100 100 1400 700]);
 
@@ -333,24 +399,25 @@ for i=1:num_files
     plot([roi_X roi_X(1)], [roi_Y roi_Y(1)], 'r-', 'LineWidth', 2);
 
     % Draw left and right lanes on original image
-    if left_found
-        plot(image_points_left(:,1), image_points_left(:,2), color_left, 'LineWidth', 2);
+    if display_left_found
+        plotLane(image_points_left_display, display_color_left, 2);
     end
-    if right_found
-        plot(image_points_right(:,1), image_points_right(:,2), color_right, 'LineWidth', 2);
+    if display_right_found
+        plotLane(image_points_right_display, display_color_right, 2);
     end
 
-    % If no lanes found
-    if ~left_found && ~right_found
+    if ~display_left_found && ~display_right_found
         text(size(I,2)/2, size(I,1)-40, 'No lanes found', ...
-            'Color', 'red', ...
-            'FontSize', 11, ...
-            'FontWeight', 'bold', ...
-            'HorizontalAlignment', 'center', ...
-            'BackgroundColor', 'black');
+            'Color', 'red', 'FontSize', 11, 'FontWeight', 'bold', ...
+            'HorizontalAlignment', 'center', 'BackgroundColor', 'black');
+    elseif use_memory
+        text(size(I,2)/2, size(I,1)-40, ...
+            sprintf('Using previous lanes (%d/%d)', missedFrames, maxMemoryFrames), ...
+            'Color', 'yellow', 'FontSize', 11, 'FontWeight', 'bold', ...
+            'HorizontalAlignment', 'center', 'BackgroundColor', 'black');
     end
 
-        % Draw YOLO detections on original image
+    % Draw YOLO detections on original image
     for d = 1:size(YOLO_bboxes, 1)
         thisBox = YOLO_bboxes(d, :);
 
@@ -364,9 +431,19 @@ for i=1:num_files
             distance_m = NaN;
         end
 
-        rectangle('Position', thisBox, 'EdgeColor', [1 1 0], 'LineWidth', 2);
+        obstacle_in_lane = obstacleInLane(thisBox, sensor, birdsEye_object, ...
+            display_left_lane_bev, display_right_lane_bev);
 
-        labelText = formatDetectionLabel(YOLO_labels(d), YOLO_scores(d), distance_m);
+        if obstacle_in_lane
+            edgeColor = [1 0 0];
+        else
+            edgeColor = [1 1 0];
+        end
+
+        rectangle('Position', thisBox, 'EdgeColor', edgeColor, 'LineWidth', 2);
+
+        labelText = formatDetectionLabel(YOLO_labels(d), YOLO_scores(d), ...
+            distance_m, obstacle_in_lane);
         text(thisBox(1), max(15, thisBox(2)-10), labelText, ...
             'Color', 'yellow', 'FontSize', 9, 'FontWeight', 'bold', ...
             'BackgroundColor', 'black', 'Margin', 1);
@@ -380,22 +457,28 @@ for i=1:num_files
     title('BEV grayscale');
     hold on;
 
-    if left_found
-        xline(locL, color_left, 'LineWidth', 2);
-        text(locL + 8, 35, char(left_type), ...
-            'Color', color_left, 'FontSize', 10, 'FontWeight', 'bold');
+    if display_left_found
+        plotLane(bev_points_left_display, display_color_left, 2);
+        text(display_locL + 8, 35, char(display_left_type), ...
+            'Color', display_color_left, 'FontSize', 10, 'FontWeight', 'bold');
     end
 
-    if right_found
-        xline(locR, color_right, 'LineWidth', 2);
-        text(locR + 8, 70, char(right_type), ...
-            'Color', color_right, 'FontSize', 10, 'FontWeight', 'bold');
+    if display_right_found
+        plotLane(bev_points_right_display, display_color_right, 2);
+        text(display_locR + 8, 70, char(display_right_type), ...
+            'Color', display_color_right, 'FontSize', 10, 'FontWeight', 'bold');
     end
 
-    if ~left_found && ~right_found
+    if ~display_left_found && ~display_right_found
         text(30, 40, 'No lanes found', ...
             'Color', 'g', ...
             'FontSize', 12, ...
+            'FontWeight', 'bold', ...
+            'BackgroundColor', 'k');
+    elseif use_memory
+        text(30, 40, sprintf('Using previous lanes (%d/%d)', missedFrames, maxMemoryFrames), ...
+            'Color', 'y', ...
+            'FontSize', 11, ...
             'FontWeight', 'bold', ...
             'BackgroundColor', 'k');
     end
@@ -418,8 +501,8 @@ for i=1:num_files
     title('Column histogram');
     grid on;
     hold on;
-    if left_found,  xline(locL, 'g', 'LineWidth', 2); end
-    if right_found, xline(locR, 'g', 'LineWidth', 2); end
+    if display_left_found,  xline(display_locL, 'g', 'LineWidth', 2); end
+    if display_right_found, xline(display_locR, 'g', 'LineWidth', 2); end
     hold off;
 
     sgtitle(sprintf('Lane detection pipeline - %s', files(i).name), 'Interpreter', 'none');
@@ -430,8 +513,116 @@ for i=1:num_files
     
 end
 
+function resolved_path = resolveSearchPath(search_path, scriptDir)
+    if isfolder(search_path) || startsWith(search_path, filesep) || ~isempty(regexp(search_path, '^[A-Za-z]:', 'once'))
+        resolved_path = search_path;
+        return;
+    end
+
+    candidate = fullfile(scriptDir, search_path);
+    if ~isempty(dir(candidate))
+        resolved_path = candidate;
+    else
+        resolved_path = search_path;
+    end
+end
+
+function Th = computeIterativeThreshold(imageData, validMask, fallbackValue)
+    valid_pixels = double(imageData(validMask));
+
+    if isempty(valid_pixels)
+        Th = fallbackValue;
+        return;
+    end
+
+    Th = (max(valid_pixels) + min(valid_pixels)) / 2;
+    Th_old = 0;
+
+    while abs(Th - Th_old) > 0.5
+        Th_old = Th;
+        groupA = valid_pixels(valid_pixels >= Th);
+        groupB = valid_pixels(valid_pixels < Th);
+
+        if isempty(groupA)
+            meanA = Th;
+        else
+            meanA = mean(groupA);
+        end
+
+        if isempty(groupB)
+            meanB = Th;
+        else
+            meanB = mean(groupB);
+        end
+
+        Th = (meanA + meanB) / 2;
+    end
+end
+
+function lane_points = traceLaneFromBinary(binaryImage, seedCol, halfWindow, colRange)
+    imageHeight = size(binaryImage, 1);
+    tracedCols = nan(imageHeight, 1);
+    currentCol = seedCol;
+
+    for row = imageHeight:-1:1
+        col_min = max(colRange(1), round(currentCol - halfWindow));
+        col_max = min(colRange(2), round(currentCol + halfWindow));
+
+        if col_min > col_max
+            continue;
+        end
+
+        activeCols = find(binaryImage(row, col_min:col_max)) + col_min - 1;
+        if isempty(activeCols)
+            continue;
+        end
+
+        splitIdx = [1, find(diff(activeCols) > 1) + 1, numel(activeCols) + 1];
+        segmentCenters = zeros(numel(splitIdx) - 1, 1);
+        for s = 1:numel(splitIdx) - 1
+            segment = activeCols(splitIdx(s):splitIdx(s+1)-1);
+            segmentCenters(s) = mean(segment);
+        end
+
+        [~, bestIdx] = min(abs(segmentCenters - currentCol));
+        currentCol = segmentCenters(bestIdx);
+        tracedCols(row) = currentCol;
+    end
+
+    supportMask = isfinite(tracedCols);
+    supportMask = bwareaopen(supportMask, 8);
+    tracedCols(~supportMask) = NaN;
+    lane_points = [tracedCols, (1:imageHeight)'];
+end
+
+function lane_type = classifyLaneType(supportMask, startRow, solidThreshold)
+    supportSlice = supportMask(startRow:end);
+    if nnz(supportSlice) >= solidThreshold
+        lane_type = "solid";
+    else
+        lane_type = "dashed";
+    end
+end
+
+function image_points = bevToImagePoints(bev_points, birdsEye_object, sensor)
+    valid = all(isfinite(bev_points), 2);
+    image_points = nan(size(bev_points));
+
+    if ~any(valid)
+        return;
+    end
+
+    vehicle_points = imageToVehicle(birdsEye_object, bev_points(valid, :));
+    projected_points = vehicleToImage(sensor, vehicle_points);
+    image_points(valid, :) = projected_points;
+end
+
+function plotLane(points, laneColor, lineWidth)
+    plot(points(:,1), points(:,2), 'Color', laneColor, 'LineWidth', lineWidth);
+end
+
 function [filtered_bboxes, filtered_scores, filtered_labels] = ...
-    filterBBoxesByROI(bboxes, scores, labels, roi_poly)
+    filterObstacleDetections(bboxes, scores, labels, roi_poly, allowedLabels)
 
     if isempty(bboxes)
         filtered_bboxes = bboxes;
@@ -445,8 +636,8 @@ function [filtered_bboxes, filtered_scores, filtered_labels] = ...
     for k = 1:size(bboxes,1)
         x_center = bboxes(k,1) + bboxes(k,3)/2;
         y_center = bboxes(k,2) + bboxes(k,4)/2;
-
-        keep(k) = isinterior(roi_poly, x_center, y_center);
+        label_ok = any(strcmpi(string(labels(k)), allowedLabels));
+        keep(k) = label_ok && isinterior(roi_poly, x_center, y_center);
     end
 
     filtered_bboxes = bboxes(keep, :);
@@ -454,10 +645,79 @@ function [filtered_bboxes, filtered_scores, filtered_labels] = ...
     filtered_labels = labels(keep, :);
 end
 
-function labelText = formatDetectionLabel(label, score, distance_m)
+function is_in_lane = obstacleInLane(bbox, sensor, birdsEye_object, ...
+    left_lane_bev, right_lane_bev)
+
+    is_in_lane = false;
+
+    if isempty(left_lane_bev) || isempty(right_lane_bev)
+        return;
+    end
+
+    if size(left_lane_bev, 1) == 0 || size(right_lane_bev, 1) == 0
+        return;
+    end
+
+    bottom_center_img = [bbox(1) + bbox(3)/2, bbox(2) + bbox(4)];
+    bottom_center_vehicle = imageToVehicle(sensor, bottom_center_img);
+    if ~all(isfinite(bottom_center_vehicle))
+        return;
+    end
+
+    bev_point = vehicleToImage(birdsEye_object, bottom_center_vehicle);
+    if ~all(isfinite(bev_point))
+        return;
+    end
+
+    lane_y = bev_point(2);
+    left_x = interpolateLaneX(left_lane_bev, lane_y);
+    right_x = interpolateLaneX(right_lane_bev, lane_y);
+
+    if ~isfinite(left_x) || ~isfinite(right_x)
+        return;
+    end
+
+    lane_margin = 10;
+    is_in_lane = (bev_point(1) >= left_x - lane_margin) && ...
+                 (bev_point(1) <= right_x + lane_margin);
+end
+
+function x_interp = interpolateLaneX(lane_points, targetY)
+    x_interp = NaN;
+
+    if isempty(lane_points) || size(lane_points,1) == 0
+        return;
+    end
+
+    valid = all(isfinite(lane_points), 2);
+    lane_points = lane_points(valid, :);
+
+    if size(lane_points,1) < 2
+        return;
+    end
+
+    uniqueY = lane_points(:,2);
+    uniqueX = lane_points(:,1);
+    [uniqueY, uniqueIdx] = unique(uniqueY);
+    uniqueX = uniqueX(uniqueIdx);
+
+    if targetY < min(uniqueY) || targetY > max(uniqueY)
+        return;
+    end
+
+    x_interp = interp1(uniqueY, uniqueX, targetY, 'linear');
+end
+
+function labelText = formatDetectionLabel(label, score, distance_m, isInLane)
     if isnan(distance_m)
-        labelText = sprintf('%s | %.2f', string(label), score);
+        baseText = sprintf('%s | %.2f', string(label), score);
     else
-        labelText = sprintf('%s | %.2f | %.1f m', string(label), score, distance_m);
+        baseText = sprintf('%s | %.2f | %.1f m', string(label), score, distance_m);
+    end
+
+    if isInLane
+        labelText = sprintf('%s | IN LANE', baseText);
+    else
+        labelText = baseText;
     end
 end
