@@ -1,6 +1,6 @@
 clear; clc; close all
 
-% Anna Roma
+% Anna Roma - s345819
 % Assignment 2 - Line Detection using GOLD Lane Detection Algorithm
 
 % Visualization tuning for narrow BEV subplots
@@ -9,7 +9,9 @@ laneLineWidth = 1.0;
 histLineWidth = 0.75;
 peakLineWidth = 0.75;
 
-search_path = 'archive/front_camera_46/*.jpg';
+
+%% select the user's path to the archive 
+search_path = 'archive/044/camera/front_camera/*.jpg'; 
 
 scriptDir = fileparts(mfilename('fullpath'));
 resolved_search_path = resolveSearchPath(search_path, scriptDir);
@@ -134,12 +136,17 @@ end
 
 
 %% OBSTACLE DETECTOR
+% The detector is initialized once before the frame loop. If YOLO is not
+% available on the current MATLAB installation, the helper function tries a
+% classical ACF fallback so the rest of the pipeline can still run.
 YOLOScoreThreshold = 0.35;
 [obstacleDetector, detectorMode] = initializeObstacleDetector();
 allowedObstacleLabels = ["car","truck","bus","motorcycle","bicycle","person","vehicle"];
 
 
 %% TEMPORARY MEMORY FOR LAST VALID LANES
+% This short memory avoids flickering: if a frame temporarily misses both
+% lanes, the visualization can reuse the most recent reliable detection.
 maxMemoryFrames = 5; missedFrames = 0;
 last_left_found = false; last_right_found = false;
 last_locL = NaN; last_locR = NaN;
@@ -154,6 +161,8 @@ for i=1:num_files
     fprintf('Processing image %d/%d: %s\n', i, num_files, files(i).name);
 
     % 0. Obstacle detection on the original image
+    % Object detection is done before lane processing because detected
+    % obstacles are later projected into BEV and removed from the lane ROI.
     [YOLO_bboxes, YOLO_scores, YOLO_labels] = detectObstacles( ...
         obstacleDetector, detectorMode, I, YOLOScoreThreshold);
 
@@ -169,11 +178,14 @@ for i=1:num_files
 
     [bev_h, bev_w, ~] = size(BEV);
 
+    % This mask marks obstacle pixels in BEV. They are excluded from the
+    % lane-search area so object texture is not confused with road markings.
     obstacle_mask_bev = false(bev_h, bev_w);
 
     for d = 1:size(YOLO_bboxes, 1)
         box = YOLO_bboxes(d, :);
 
+        % Convert MATLAB bbox format [x y width height] into four corners.
         x1 = box(1);
         y1 = box(2);
         x2 = box(1) + box(3);
@@ -195,6 +207,8 @@ for i=1:num_files
             continue;
         end
 
+        % Image points -> vehicle coordinates -> BEV coordinates.
+        % This uses the same camera model as the lane projection.
         bbox_pts_vehicle = imageToVehicle(sensor, bbox_pts_img);
         valid = all(isfinite(bbox_pts_vehicle), 2);
         bbox_pts_vehicle = bbox_pts_vehicle(valid, :);
@@ -221,6 +235,7 @@ for i=1:num_files
             continue;
         end
 
+        % Add the current obstacle polygon to the cumulative BEV mask.
         obstacle_mask_bev = obstacle_mask_bev | ...
             poly2mask(bbox_pts_bev(:,1), bbox_pts_bev(:,2), bev_h, bev_w);
     end
@@ -359,6 +374,8 @@ for i=1:num_files
                  (last_left_found || last_right_found);
 
     if use_memory %no lanes fouund, visualize the last valid lanes found in the memory
+        % Display variables are separated from current detections so the
+        % plotting code can use either the current frame or memory fallback.
         display_left_found = last_left_found;
         display_right_found = last_right_found;
 
@@ -542,6 +559,9 @@ for i=1:num_files
     
 end
 
+%% HELPER FUNCTIONS
+
+% This function resolves the search path for the image files. If the provided search path is already an absolute path or a valid folder, it returns it as is. Otherwise, it treats the search path as relative to the script directory and checks if it exists there. If it does, it returns the resolved path; if not, it returns the original search path, which may lead to an error later if it's invalid.
 function resolved_path = resolveSearchPath(search_path, scriptDir)
     if isfolder(search_path) || startsWith(search_path, filesep) || ~isempty(regexp(search_path, '^[A-Za-z]:', 'once'))
         resolved_path = search_path;
@@ -556,6 +576,7 @@ function resolved_path = resolveSearchPath(search_path, scriptDir)
     end
 end
 
+% This function computes an iterative threshold for lane detection in a given half of the BEV image.
 function Th = computeIterativeThreshold(imageData, validMask, fallbackValue)
     valid_pixels = double(imageData(validMask));
 
@@ -588,6 +609,8 @@ function Th = computeIterativeThreshold(imageData, validMask, fallbackValue)
     end
 end
 
+
+% This function traces a lane line vertically through the binary BEV image, starting from a seed column.
 function lane_points = traceLaneFromBinary(binaryImage, seedCol, halfWindow, colRange)
     imageHeight = size(binaryImage, 1);
     tracedCols = nan(imageHeight, 1);
@@ -624,6 +647,8 @@ function lane_points = traceLaneFromBinary(binaryImage, seedCol, halfWindow, col
     lane_points = [tracedCols, (1:imageHeight)'];
 end
 
+
+% This function classifies a lane as "solid" or "dashed" based on the continuity and coverage of the supporting rows in the BEV binary image.
 function lane_type = classifyLaneType(supportMask, startRow, solidThreshold)
     supportSlice = supportMask(startRow:end);
 
@@ -653,6 +678,8 @@ function lane_type = classifyLaneType(supportMask, startRow, solidThreshold)
     end
 end
 
+
+% This function projects lane points from BEV back to the original image.
 function image_points = bevToImagePoints(bev_points, birdsEye_object, sensor)
     valid = all(isfinite(bev_points), 2);
     image_points = nan(size(bev_points));
@@ -666,6 +693,10 @@ function image_points = bevToImagePoints(bev_points, birdsEye_object, sensor)
     image_points(valid, :) = projected_points;
 end
 
+
+% This function plots lane lines on the image. 
+% It takes care of NaN values in the points, which represent missing detections, so that the plot breaks into segments instead 
+% of connecting everything with a solid line.
 function plotLane(points, laneColor, lineWidth)
     if isempty(points) || size(points, 1) == 0
         return;
@@ -680,6 +711,10 @@ function plotLane(points, laneColor, lineWidth)
     plot(points(:,1), points(:,2), 'Color', laneColor, 'LineWidth', lineWidth);
 end
 
+
+% This function converts a binary mask into a list of boundary points. 
+% It uses bwboundaries to find connected components and their boundaries, then selects the longest boundary as the main lane line. The output is a list of (x,y) coordinates of the boundary points, 
+% which can be used for visualization or further processing.
 function boundary_points = maskToBoundary(binaryMask)
     boundaries = bwboundaries(binaryMask, 'noholes');
 
@@ -694,6 +729,10 @@ function boundary_points = maskToBoundary(binaryMask)
     boundary_points = [boundary_rc(:,2), boundary_rc(:,1)];
 end
 
+
+% This function initializes the obstacle detector. 
+% It first tries to load a YOLO v4 tiny COCO model, and if that fails (e.g., due to missing support package), 
+% it falls back to ACF vehicle and people detectors. The function returns a struct containing the loaded detector(s) and a mode string indicating which detector is active.
 function [detector, mode] = initializeObstacleDetector()
     detector = struct();
     mode = "none";
@@ -723,6 +762,10 @@ function [detector, mode] = initializeObstacleDetector()
     end
 end
 
+
+% This function detects obstacles in the input image using the specified detector. 
+% It supports both YOLO and ACF detectors, returning bounding boxes, confidence scores, and class labels for detected objects. 
+% The function handles the differences in output formats between the two detector types and ensures that the outputs are consistent for downstream processing.
 function [bboxes, scores, labels] = detectObstacles(detector, mode, I, yoloThreshold)
     bboxes = zeros(0, 4);
     scores = zeros(0, 1);
@@ -759,6 +802,9 @@ function [bboxes, scores, labels] = detectObstacles(detector, mode, I, yoloThres
     end
 end
 
+
+% This function filters detected obstacles based on their class labels and whether they are located within 
+% the defined ROI polygon.
 function [filtered_bboxes, filtered_scores, filtered_labels] = ...
     filterObstacleDetections(bboxes, scores, labels, roi_poly, allowedLabels)
 
@@ -796,6 +842,8 @@ function [filtered_bboxes, filtered_scores, filtered_labels] = ...
     filtered_labels = labels(keep, :);
 end
 
+% This function checks if the bottom center of the obstacle bounding box is within the lane boundaries defined 
+% by left_lane_bev and right_lane_bev.
 function is_in_lane = obstacleInLane(bbox, sensor, birdsEye_object, ...
     left_lane_bev, right_lane_bev)
 
@@ -833,6 +881,9 @@ function is_in_lane = obstacleInLane(bbox, sensor, birdsEye_object, ...
                  (bev_point(1) <= right_x + lane_margin);
 end
 
+
+% This function performs linear interpolation to find the x-coordinate of the lane at a given y-coordinate (lane_y) in the BEV image. 
+% It uses the detected lane points (lane_points) to estimate the lane position at that specific y-level.
 function x_interp = interpolateLaneX(lane_points, targetY)
     x_interp = NaN;
 
@@ -859,6 +910,9 @@ function x_interp = interpolateLaneX(lane_points, targetY)
     x_interp = interp1(uniqueY, uniqueX, targetY, 'linear');
 end
 
+
+% This function formats the label text for detected obstacles, including the class label, confidence score, 
+% estimated distance, and whether the obstacle is in the lane.
 function labelText = formatDetectionLabel(label, score, distance_m, isInLane)
     if isnan(distance_m)
         baseText = sprintf('%s | %.2f', string(label), score);
