@@ -49,7 +49,7 @@ if isfield(diagnostics, "message") && strlength(string(diagnostics.message)) > 0
     annotatedFrame = insertText(annotatedFrame, [10, 10], string(diagnostics.message), ...
         "FontSize", config.warningFontSize, ...
         "TextColor", "white", ...
-        "BoxColor", "red", ...
+        "BoxColor", localMessageColor(string(diagnostics.message)), ...
         "BoxOpacity", 0.55);
 end
 
@@ -64,3 +64,17 @@ function colorName = localStateColor(stateLabel)
         otherwise
             colorName = "green";
     end
+end
+
+function colorName = localMessageColor(messageText)
+    if contains(lower(messageText), "calibrating")
+        colorName = "blue";
+    elseif contains(lower(messageText), "move closer") || contains(lower(messageText), "keep") || ...
+            contains(lower(messageText), "hold still") || contains(lower(messageText), "face frontal")
+        colorName = "yellow";
+    else
+        colorName = "red";
+    end
+end
+
+end

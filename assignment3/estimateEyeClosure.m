@@ -22,9 +22,9 @@ eyeMetrics.leftOpenness = leftOpenness;
 eyeMetrics.rightOpenness = rightOpenness;
 eyeMetrics.confidence = min(leftConfidence, rightConfidence);
 
-if any(isnan(eyeBaseline)) || any(eyeBaseline <= 0)
-    return;
-end
+    if isempty(eyeBaseline) || numel(eyeBaseline) < 2 || any(isnan(eyeBaseline)) || any(eyeBaseline <= 0)
+        return;
+    end
 
 eyeMetrics.leftRatio = leftOpenness / eyeBaseline(1);
 eyeMetrics.rightRatio = rightOpenness / eyeBaseline(2);
@@ -71,4 +71,3 @@ function [openness, confidence] = localEyeOpenness(frame, eyeBox, config)
 
     openness = 0.7 * structuralHeight + 0.3 * darkHeight;
     confidence = min(1, max(rowContrast) / 0.12);
-
