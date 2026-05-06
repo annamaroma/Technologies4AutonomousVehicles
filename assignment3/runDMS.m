@@ -47,16 +47,20 @@ L_EYE_OUT  = 263 + 1;  L_EYE_IN = 362 + 1;
 
 %% Initialise Python bridge 
 fprintf('Initialising Python MediaPipe bridge...\n');
-try
-    bridge = py.importlib.import_module('mediapipe_bridge');
-    ok = bridge.initialize(0);
-    if ~ok; error('Cannot open webcam in Python.'); end
-catch ME
-    error(['Python bridge failed: ' ME.message ...
-           '\nCheck pyenv and that mediapipe/cv2 are installed.']);
+
+pythonExe = '/home/annaroma/dms_env/bin/python';
+
+cmd = sprintf('"%s" "%s"', pythonExe, scriptDir + "/mediapipe_bridge.py");
+status = system(cmd);
+
+if status ~= 0
+    error('runDMS:PythonFailed', ...
+          'Python mediapipe_bridge.py failed. Run it from terminal to see the full error.');
 end
 
+
 %% Video writer
+fprintf('Initialising video writer...\n');
 if RECORD
     if isfile(OUT_FILE)
         try
@@ -73,6 +77,7 @@ if RECORD
 end
 
 %% Display figure 
+fprintf('Initialising display...\n');
 hFig = figure('Name','DMS - press any key to stop','NumberTitle','off', ...
               'KeyPressFcn', @(~,~) setappdata(gcf,'stop',true));
 setappdata(hFig,'stop',false);
@@ -121,7 +126,7 @@ end
 fprintf('Baseline nose x = %.3f, y = %.3f\n', nose_cx, nose_cy);
 
 %% State variables
-
+fprintf('Entering main loop...\n');
 % Owl
 head_away_start = NaN;    
 long_alarm      = false;
@@ -397,3 +402,4 @@ else
     set(hImg, 'CData', frame);
 end
 end
+
