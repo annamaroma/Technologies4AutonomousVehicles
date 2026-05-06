@@ -49,14 +49,38 @@ L_EYE_OUT  = 263 + 1;  L_EYE_IN = 362 + 1;
 fprintf('Initialising Python MediaPipe bridge...\n');
 
 pythonExe = '/home/annaroma/dms_env/bin/python';
-
-cmd = sprintf('"%s" "%s"', pythonExe, scriptDir + "/mediapipe_bridge.py");
-status = system(cmd);
-
-if status ~= 0
-    error('runDMS:PythonFailed', ...
-          'Python mediapipe_bridge.py failed. Run it from terminal to see the full error.');
+pe = pyenv;
+if strcmp(string(pe.Status), "NotLoaded")
+    pyenv("Version", pythonExe);
+    pe = pyenv;
+elseif ~strcmp(string(pe.Version), string(pythonExe))
+    warning('runDMS:PythonVersionMismatch', ...
+        ['MATLAB Python is already loaded from %s. Requested interpreter is %s. ' ...
+         'Restart MATLAB to switch interpreter if MediaPipe is unavailable.'], ...
+        pe.Version, pythonExe);
 end
+
+py.importlib.invalidate_caches();
+sysPathObj = py.sys.path();
+sysPath = cell(sysPathObj);
+sysPath = cellfun(@char, sysPath, 'UniformOutput', false);
+if ~any(strcmp(sysPath, scriptDir))
+    sysPathObj.insert(int32(0), scriptDir);
+end
+
+bridge = py.importlib.import_module('mediapipe_bridge');
+bridge = py.importlib.reload(bridge);
+
+
+ok = logical(bridge.initialize(int32(0)));
+if ~ok
+    error('runDMS:PythonInitFailed', ...
+          'Failed to initialize mediapipe_bridge. Check webcam access and Python dependencies.');
+end
+
+
+
+
 
 
 %% Video writer
@@ -71,7 +95,27 @@ if RECORD
             warning('DMS_output.mp4 locked, writing to %s instead.', OUT_FILE);
         end
     end
-    vw = VideoWriter(OUT_FILE, 'MPEG-4');
+    try
+        vw = VideoWriter(OUT_FILE, 'MPEG-4');
+    catch ME
+        if contains(ME.message, 'profile is not valid', 'IgnoreCase', true)
+            [p, n, ~] = fileparts(OUT_FILE);
+            OUT_FILE = fullfile(p, sprintf('%s.avi', n));
+            if isfile(OUT_FILE)
+                try
+                    delete(OUT_FILE);
+                catch
+                    OUT_FILE = fullfile(p, sprintf('%s_%s.avi', n, char(datetime('now','Format','yyyyMMdd_HHmmss'))));
+                end
+            end
+            warning('runDMS:VideoWriterFallback', ...
+                'MPEG-4 not available in this MATLAB installation. Falling back to Motion JPEG AVI: %s', ...
+                OUT_FILE);
+            vw = VideoWriter(OUT_FILE, 'Motion JPEG AVI');
+        else
+            rethrow(ME);
+        end
+    end
     vw.FrameRate = 20;
     open(vw);
 end
@@ -153,6 +197,7 @@ hr_bpm   = NaN;
 t_last_hr = -Inf;
 
 state   = 'Focused on the road';
+state_alarm_sec = 0;
 t_start = tic;
 
 %% Main Loop
@@ -330,12 +375,23 @@ while ~getappdata(hFig,'stop')
     end
 
     %% Overall driver state (Sleep > Microsleep > Long > Short > Focused) 
+    state_alarm_sec = 0;
     if eye_alarm == 2
         state = 'Sleep';
+        state_alarm_sec = max(0, t_now - eye_close_start - SLEEP_SEC);
     elseif eye_alarm == 1
         state = 'Microsleep';
     elseif long_alarm || lizard_alarm_long
         state = 'Distracted (long)';
+        owl_long_sec = 0;
+        liz_long_sec = 0;
+        if long_alarm && ~isnan(head_away_start)
+            owl_long_sec = max(0, t_now - head_away_start - LONG_OWL_SEC);
+        end
+        if lizard_alarm_long && ~isnan(lizard_away_start)
+            liz_long_sec = max(0, t_now - lizard_away_start - LONG_OWL_SEC);
+        end
+        state_alarm_sec = max(owl_long_sec, liz_long_sec);
     elseif short_alarm || lizard_alarm_short
         state = 'Distracted (short)';
     else
@@ -351,7 +407,7 @@ while ~getappdata(hFig,'stop')
                 nose_x, nose_y, nose_dx, nose_dy), ...
         'FontSize', 12, 'BoxColor', [0 0 0], 'BoxOpacity', 0.5, ...
         'TextColor', 'white', 'AnchorPoint', 'CenterTop');
-    out = addOverlay(out, state, hr_bpm);
+    out = addOverlay(out, state, hr_bpm, state_alarm_sec);
     if RECORD; writeVideo(vw, out); end
     hImg = showFrame(hImg, out, hAx);
     drawnow limitrate;
@@ -403,3 +459,171 @@ else
 end
 end
 
+function mean_rgb = getFaceMeanRGB(frame, lm)
+mean_rgb = [NaN NaN NaN];
+if isempty(frame) || isempty(lm) || size(lm,1) < 455
+    return;
+end
+
+[h, w, ~] = size(frame);
+faceOval = [10 338 297 332 284 251 389 356 454 323 361 288 397 365 ...
+            379 378 400 377 152 148 176 149 150 136 172 58 132 93 ...
+            234 127 162 21 54 103 67 109] + 1;
+xy = lm(faceOval, 1:2) .* [w h];
+
+x1 = max(1, floor(min(xy(:,1))));
+x2 = min(w, ceil(max(xy(:,1))));
+y1 = max(1, floor(min(xy(:,2))));
+y2 = min(h, ceil(max(xy(:,2))));
+
+if x2 <= x1 || y2 <= y1
+    return;
+end
+
+roiW = x2 - x1 + 1;
+roiH = y2 - y1 + 1;
+x1 = max(1, round(x1 + 0.18 * roiW));
+x2 = min(w, round(x2 - 0.18 * roiW));
+y1 = max(1, round(y1 + 0.18 * roiH));
+y2 = min(h, round(y2 - 0.30 * roiH));
+
+if x2 <= x1 || y2 <= y1
+    return;
+end
+
+roi = double(frame(y1:y2, x1:x2, :));
+mean_rgb = squeeze(mean(mean(roi, 1), 2))';
+end
+
+function hr_bpm = estimateHR(rgb_buf, t_buf, bpmRange)
+hr_bpm = NaN;
+if size(rgb_buf,1) < 60 || numel(t_buf) < 60
+    return;
+end
+
+t_buf = t_buf(:);
+dt = median(diff(t_buf));
+if ~isfinite(dt) || dt <= 0
+    return;
+end
+fs = 1 / dt;
+if ~isfinite(fs) || fs <= 0
+    return;
+end
+
+t_uniform = (t_buf(1):dt:t_buf(end))';
+if numel(t_uniform) < 60
+    return;
+end
+
+rgb_uniform = interp1(t_buf, double(rgb_buf), t_uniform, 'linear', 'extrap');
+rgb_uniform = rgb_uniform ./ max(mean(rgb_uniform, 1), eps);
+rgb_uniform = detrend(rgb_uniform);
+
+sig = rgb_uniform(:,2) - 0.5 * (rgb_uniform(:,1) + rgb_uniform(:,3));
+sig = sig - mean(sig);
+win = 0.5 - 0.5 * cos(2 * pi * (0:numel(sig)-1)' / max(numel(sig)-1, 1));
+sig = sig .* win;
+
+nfft = 2^nextpow2(numel(sig));
+Y = fft(sig, nfft);
+P = abs(Y(1:floor(nfft/2)+1)).^2;
+f = (0:floor(nfft/2))' * (fs / nfft);
+bpm = 60 * f;
+
+keep = bpm >= bpmRange(1) & bpm <= bpmRange(2);
+if ~any(keep)
+    return;
+end
+
+[~, idx] = max(P(keep));
+bpmCand = bpm(keep);
+hr_bpm = bpmCand(idx);
+end
+
+function ear = computeEAR(eyePts)
+ear = NaN;
+if size(eyePts,1) ~= 6
+    return;
+end
+
+d14 = norm(eyePts(1,:) - eyePts(4,:));
+if d14 <= eps
+    return;
+end
+
+d26 = norm(eyePts(2,:) - eyePts(6,:));
+d35 = norm(eyePts(3,:) - eyePts(5,:));
+ear = (d26 + d35) / (2 * d14);
+end
+
+function out = drawLandmarks(frame, lm)
+out = frame;
+if isempty(frame) || isempty(lm) || size(lm,1) < 478
+    return;
+end
+
+[h, w, ~] = size(frame);
+leftEye  = [362 382 381 380 374 373 390 249 263 466 388 387 386 385 384 398] + 1;
+rightEye = [33 7 163 144 145 153 154 155 133 173 157 158 159 160 161 246] + 1;
+leftIris = [473 474 475 476 477] + 1;
+rightIris= [468 469 470 471 472] + 1;
+noseTip  = [45 4 275] + 1;
+faceOval = [10 338 297 332 284 251 389 356 454 323 361 288 397 365 ...
+            379 378 400 377 152 148 176 149 150 136 172 58 132 93 ...
+            234 127 162 21 54 103 67 109] + 1;
+facePts = lm(faceOval, 1:2) .* [w h];
+minXY = min(facePts, [], 1);
+maxXY = max(facePts, [], 1);
+rect = [minXY(1), minXY(2), maxXY(1)-minXY(1), maxXY(2)-minXY(2)];
+leftEyeCircles  = [lm(leftEye, 1:2) .* [w h], repmat(2, numel(leftEye), 1)];
+rightEyeCircles = [lm(rightEye,1:2) .* [w h], repmat(2, numel(rightEye),1)];
+leftIrisCircles = [lm(leftIris,1:2) .* [w h], repmat(2, numel(leftIris),1)];
+rightIrisCircles= [lm(rightIris,1:2).* [w h], repmat(2, numel(rightIris),1)];
+noseCircles     = [lm(noseTip, 1:2) .* [w h], repmat(2, numel(noseTip), 1)];
+out = insertShape(out, 'Rectangle', rect, 'Color', 'cyan', 'LineWidth', 2);
+out = insertShape(out, 'FilledCircle', leftEyeCircles,   'Color', 'red',   'Opacity', 1);
+out = insertShape(out, 'FilledCircle', rightEyeCircles,  'Color', 'red',   'Opacity', 1);
+out = insertShape(out, 'FilledCircle', leftIrisCircles,  'Color', 'green', 'Opacity', 1);
+out = insertShape(out, 'FilledCircle', rightIrisCircles, 'Color', 'green', 'Opacity', 1);
+out = insertShape(out, 'FilledCircle', noseCircles,      'Color', 'blue',  'Opacity', 1);
+end
+
+function out = addOverlay(frame, state, hr_bpm, state_alarm_sec)
+out = frame;
+[h, w, ~] = size(frame);
+
+switch state
+    case 'Focused on the road'
+        stateColor = [0 140 0];
+    case 'Distracted (short)'
+        stateColor = [230 140 0];
+    case 'Distracted (long)'
+        stateColor = [220 70 0];
+    case 'Microsleep'
+        stateColor = [220 120 0];
+    case 'Sleep'
+        stateColor = [190 0 0];
+    otherwise
+        stateColor = [40 40 40];
+end
+
+stateFont = 18;
+if strcmp(state, 'Sleep') || strcmp(state, 'Distracted (long)')
+    stateFont = min(42, 18 + 4 * floor(max(0, state_alarm_sec)));
+end
+
+if isnan(hr_bpm)
+    hrText = 'HR: -- bpm';
+else
+    hrText = sprintf('HR: %.0f bpm', hr_bpm);
+end
+
+out = insertText(out, [w - 10, h - 10], state, ...
+    'FontSize', stateFont, 'BoxColor', stateColor, 'BoxOpacity', 0.70, ...
+    'TextColor', 'white', 'AnchorPoint', 'RightBottom');
+hrYOffset = 20 + ceil(1.8 * stateFont);
+out = insertText(out, [w - 10, h - hrYOffset], hrText, ...
+    'FontSize', 16, 'BoxColor', [0 0 0], 'BoxOpacity', 0.55, ...
+    'TextColor', 'white', 'AnchorPoint', 'RightBottom');
+end
