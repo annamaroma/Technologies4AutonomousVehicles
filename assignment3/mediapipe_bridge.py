@@ -31,6 +31,7 @@ _FRAME_HEIGHT = 480
 
 _cap = None
 _face_mesh = None
+_face_detector = None
 
 
 def _open_capture(camera_index: int):
@@ -60,11 +61,15 @@ def _open_capture(camera_index: int):
 
 def initialize(camera_index: int = 0) -> bool:
     """Create FaceMesh and open the webcam without starting any preview loop."""
-    global _cap, _face_mesh
+    global _cap, _face_mesh, _face_detector
 
     release()
 
     try:
+        _face_detector = mp.solutions.face_detection.FaceDetection(
+            model_selection=0,
+            min_detection_confidence=0.55,
+        )
         _face_mesh = mp.solutions.face_mesh.FaceMesh(
             max_num_faces=1,
             refine_landmarks=True,
@@ -99,7 +104,7 @@ def capture_frame() -> Tuple[bytes, int, int]:
 
 def detect_landmarks(frame_bytes, height: int, width: int) -> List[float]:
     """Rebuild an RGB frame from bytes and return flattened landmarks."""
-    if _face_mesh is None:
+    if _face_mesh is None or _face_detector is None:
         return []
 
     height = int(height)
@@ -113,6 +118,14 @@ def detect_landmarks(frame_bytes, height: int, width: int) -> List[float]:
         return []
 
     frame_rgb = frame_np.reshape((height, width, 3))
+    det_results = _face_detector.process(frame_rgb)
+    if not det_results.detections:
+        return []
+
+    score = float(det_results.detections[0].score[0])
+    if score < 0.55:
+        return []
+
     results = _face_mesh.process(frame_rgb)
     if not results.multi_face_landmarks:
         return []
@@ -126,7 +139,7 @@ def detect_landmarks(frame_bytes, height: int, width: int) -> List[float]:
 
 def release() -> None:
     """Release camera and FaceMesh resources."""
-    global _cap, _face_mesh
+    global _cap, _face_mesh, _face_detector
 
     if _cap is not None:
         try:
@@ -139,6 +152,12 @@ def release() -> None:
             _face_mesh.close()
         finally:
             _face_mesh = None
+
+    if _face_detector is not None:
+        try:
+            _face_detector.close()
+        finally:
+            _face_detector = None
 
 
 def _run_preview(camera_index: int = 0) -> None:

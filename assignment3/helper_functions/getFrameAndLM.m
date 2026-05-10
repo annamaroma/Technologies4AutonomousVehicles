@@ -4,6 +4,7 @@
 %% capture a video frame and detect facial landmarks using the Python bridge
 function [frame, h, w, lm] = getFrameAndLM(bridge)
     lm = [];  frame = [];  h = 0;  w = 0;
+    persistent lastWarnTic
 
     try
         py_result = cell(bridge.capture_frame());
@@ -20,7 +21,12 @@ function [frame, h, w, lm] = getFrameAndLM(bridge)
         coords = double(py.array.array('d', py_lm));
         if isempty(coords); return; end
         lm = reshape(coords, 3, [])';   % 478 x 3  [x y z]
-    catch
-
+    catch ME
+        if isempty(lastWarnTic) || toc(lastWarnTic) > 5
+            warning('getFrameAndLM:BridgeError', ...
+                'MediaPipe bridge error: %s', ME.message);
+            lastWarnTic = tic;
+        end
+        lm = [];
     end
 end

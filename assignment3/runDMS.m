@@ -1,23 +1,18 @@
-clc; close all;
+clc; close all; clear all;
 
 % Anna Roma - s345819
 % Assignment 3 - Driver Monitoring System
 
-
-addpath("libraries");
 %% Paths
 scriptDir  = fileparts(mfilename('fullpath'));
-libDir   = fullfile(scriptDir, 'libraries', 'remote_PPG');
 addpath(scriptDir);
-addpath(libDir);
-addpath(fullfile(scriptDir, 'libraries', 'ICA'));
-addpath("libraries");
+addpath(fullfile(scriptDir, 'libraries'));
+addpath(fullfile(scriptDir, 'helper_functions'));
 
 %% Parameters
-CALIB_SEC        = 3;     % seconds to look forward for baseline calibration
-NOSE_THRESH      = 0.060; % normalised deviation (x or y) triggering head-away detection
-IRIS_THRESH      = 0.005; % normalised iris offset for lizard distraction
-EAR_THRESH       = 0.300; % Eye Aspect Ratio below this = eyes closed (calibrated live)
+CALIB_SEC        = 3;     % target seconds of valid forward-looking calibration data
+CALIB_MAX_SEC    = 12;    % maximum wall-clock time allowed for calibration
+CALIB_MIN_FRAMES = 50;    % minimum valid frames required to lock the baselines
 LONG_OWL_SEC     = 5.0;   % continuous head-away time for long owl alarm
 SHORT_OWL_WIN    = 30.0;  % sliding-window length for short owl [s]
 SHORT_OWL_CUM    = 10.0;  % cumulative away time inside window [s]
@@ -28,8 +23,12 @@ EYE_RESET_SEC    = 2.0;   % eye-open time to clear microsleep/sleep alarm
 RPPG_BUF_SEC     = 20;    % seconds of RGB history for rPPG
 RPPG_UPDATE_SEC  = 5;     % update heart rate every N seconds
 BPM_RANGE        = [45 165];
+EAR_THRESH_RANGE = [0.18 0.34];
+NOSE_THRESH_MIN  = [0.10 0.12]; % [x y] minimum threshold on nose-vs-eyes relative pose
+IRIS_THRESH_MIN  = [0.12 0.18]; % [x y] minimum threshold on normalized iris motion
 RECORD           = true;  % set false to skip MP4 saving (live preview only)
-OUT_FILE         = fullfile(scriptDir, 'results', 'DMS_output.mp4');
+timestamp        = char(datetime('now','Format','yyyyMMdd_HHmmss'));
+OUT_FILE         = fullfile(scriptDir, 'results', sprintf('DMS_output_%s.mp4', timestamp));
 
 %% Landmark index maps  
 % Right eye EAR: p1 outer, p2 up-out, p3 up-in, p4 inner, p5 lo-in, p6 lo-out
@@ -48,16 +47,19 @@ L_EYE_OUT  = 263 + 1;  L_EYE_IN = 362 + 1;
 %% Initialise Python bridge 
 fprintf('Initialising Python MediaPipe bridge...\n');
 
-pythonExe = '/home/annaroma/dms_env/bin/python';
+pythonExe = resolvePythonExecutable(scriptDir);
 pe = pyenv;
 if strcmp(string(pe.Status), "NotLoaded")
-    pyenv("Version", pythonExe);
+    if strlength(pythonExe) == 0
+        error('runDMS:PythonNotFound', ...
+            ['No usable Python interpreter found. Set DMS_PYTHON or install a Python ' ...
+             'environment with mediapipe and opencv-python.']);
+    end
+    pyenv("Version", char(pythonExe));
     pe = pyenv;
-elseif ~strcmp(string(pe.Version), string(pythonExe))
-    warning('runDMS:PythonVersionMismatch', ...
-        ['MATLAB Python is already loaded from %s. Requested interpreter is %s. ' ...
-         'Restart MATLAB to switch interpreter if MediaPipe is unavailable.'], ...
-        pe.Version, pythonExe);
+elseif strlength(pythonExe) > 0 && ~strcmp(string(pe.Version), string(pythonExe))
+    fprintf(['MATLAB Python already loaded from %s; continuing with that interpreter ' ...
+             '(requested: %s).\n'], pe.Version, pythonExe);
 end
 
 py.importlib.invalidate_caches();
@@ -86,15 +88,6 @@ end
 %% Video writer
 fprintf('Initialising video writer...\n');
 if RECORD
-    if isfile(OUT_FILE)
-        try
-            delete(OUT_FILE);
-        catch
-            [p, n, e] = fileparts(OUT_FILE);
-            OUT_FILE = fullfile(p, sprintf('%s_%s%s', n, char(datetime('now','Format','yyyyMMdd_HHmmss')), e));
-            warning('DMS_output.mp4 locked, writing to %s instead.', OUT_FILE);
-        end
-    end
     try
         vw = VideoWriter(OUT_FILE, 'MPEG-4');
     catch ME
@@ -108,9 +101,8 @@ if RECORD
                     OUT_FILE = fullfile(p, sprintf('%s_%s.avi', n, char(datetime('now','Format','yyyyMMdd_HHmmss'))));
                 end
             end
-            warning('runDMS:VideoWriterFallback', ...
-                'MPEG-4 not available in this MATLAB installation. Falling back to Motion JPEG AVI: %s', ...
-                OUT_FILE);
+            fprintf(['MPEG-4 not available in this MATLAB installation. ' ...
+                     'Falling back to Motion JPEG AVI: %s\n'], OUT_FILE);
             vw = VideoWriter(OUT_FILE, 'Motion JPEG AVI');
         else
             rethrow(ME);
@@ -139,51 +131,103 @@ hNoFaceTxt = text(0.5, 0.5, 'No face detected', 'Parent', hAxOv, ...
 hImg = [];
 
 %% Calibration phase 
-fprintf('Calibration: look forward for %.0f seconds...\n', CALIB_SEC);
-nose_cx  = 0.5;   % default centre (normalised x)
-nose_cy  = 0.5;   % default centre (normalised y)
-calib_xs = zeros(1, ceil(CALIB_SEC * 60));   % preallocate (60 fps upper bound)
-calib_ys = zeros(1, ceil(CALIB_SEC * 60));
+fprintf('Calibration: look forward for %.0f seconds of valid face data...\n', CALIB_SEC);
+
+calibCap = max(CALIB_MIN_FRAMES + 20, ceil(CALIB_MAX_SEC * 25));
+calib_nose_x = zeros(calibCap, 1);
+calib_nose_y = zeros(calibCap, 1);
+calib_ears   = zeros(calibCap, 1);
+calib_rh     = zeros(calibCap, 1);
+calib_lh     = zeros(calibCap, 1);
+calib_rv     = zeros(calibCap, 1);
+calib_lv     = zeros(calibCap, 1);
 n_calib  = 0;
 t_calib  = tic;
 
-while toc(t_calib) < CALIB_SEC
+while n_calib < CALIB_MIN_FRAMES && toc(t_calib) < CALIB_MAX_SEC
     [frame, h, w, lm] = getFrameAndLM(bridge);
-    if ~isempty(lm)
-        n_calib = n_calib + 1;
-        calib_xs(n_calib) = lm(NOSE_IDX, 1);
-        calib_ys(n_calib) = lm(NOSE_IDX, 2);
-        frame = insertText(frame, [w/2, 30], ...
-            sprintf('Calibrating... %.1f s', CALIB_SEC-toc(t_calib)), ...
-            'FontSize',16,'BoxColor',[0 0 0],'BoxOpacity',0.6,'TextColor','white', ...
-            'AnchorPoint','CenterTop');
+    if isempty(frame)
+        drawnow limitrate;
+        continue;
     end
+
+    [metrics, face_valid] = extractFaceMetrics(lm, RE_IDX, LE_IDX, NOSE_IDX, ...
+        R_IRIS_IDX, L_IRIS_IDX, R_EYE_OUT, R_EYE_IN, L_EYE_OUT, L_EYE_IN);
+
+    if face_valid
+        n_calib = n_calib + 1;
+        calib_nose_x(n_calib) = metrics.nose_rel_x;
+        calib_nose_y(n_calib) = metrics.nose_rel_y;
+        calib_ears(n_calib)   = metrics.ear;
+        calib_rh(n_calib)     = metrics.r_iris_h;
+        calib_lh(n_calib)     = metrics.l_iris_h;
+        calib_rv(n_calib)     = metrics.r_iris_v;
+        calib_lv(n_calib)     = metrics.l_iris_v;
+        frame = drawLandmarks(frame, lm);
+        msg = sprintf('Calibrating... %d/%d valid frames', n_calib, CALIB_MIN_FRAMES);
+        boxColor = [0 120 0];
+    else
+        msg = sprintf('Calibration: keep both eyes and nose visible (%d/%d)', n_calib, CALIB_MIN_FRAMES);
+        boxColor = [180 80 0];
+    end
+
+    frame = insertText(frame, [w/2, 30], msg, ...
+        'FontSize', 16, 'BoxColor', boxColor, 'BoxOpacity', 0.65, 'TextColor', 'white', ...
+        'AnchorPoint', 'CenterTop');
     hImg = showFrame(hImg, frame, hAx);
     drawnow limitrate;
 end
-calib_xs = calib_xs(1:n_calib);   % trim unused slots
-calib_ys = calib_ys(1:n_calib);
-if ~isempty(calib_xs)
-    nose_cx = mean(calib_xs);
-    nose_cy = mean(calib_ys);
+
+if n_calib < CALIB_MIN_FRAMES
+    bridge.release();
+    try close(hFig); catch; end
+    error('runDMS:CalibrationFailed', ...
+        'Calibration failed: not enough valid face frames. Keep eyes and nose visible and try again.');
 end
-fprintf('Baseline nose x = %.3f, y = %.3f\n', nose_cx, nose_cy);
+
+calib_nose_x = calib_nose_x(1:n_calib);
+calib_nose_y = calib_nose_y(1:n_calib);
+calib_ears   = calib_ears(1:n_calib);
+calib_rh     = calib_rh(1:n_calib);
+calib_lh     = calib_lh(1:n_calib);
+calib_rv     = calib_rv(1:n_calib);
+calib_lv     = calib_lv(1:n_calib);
+
+nose_cx = median(calib_nose_x);
+nose_cy = median(calib_nose_y);
+ear_open = median(calib_ears);
+EAR_THRESH = min(EAR_THRESH_RANGE(2), max(EAR_THRESH_RANGE(1), ...
+    ear_open - max([0.04, 3 * robustStd(calib_ears), 0.22 * ear_open])));
+NOSE_THRESH = max(NOSE_THRESH_MIN, ...
+    [4 * robustStd(calib_nose_x), 4 * robustStd(calib_nose_y)]);
+r_iris_base = [median(calib_rh), median(calib_rv)];
+l_iris_base = [median(calib_lh), median(calib_lv)];
+IRIS_THRESH = max(IRIS_THRESH_MIN, ...
+    [4 * max(robustStd(calib_rh), robustStd(calib_lh)), ...
+     4 * max(robustStd(calib_rv), robustStd(calib_lv))]);
+
+fprintf(['Calibration locked: nose=[%.3f %.3f], EARopen=%.3f, EARth=%.3f, ' ...
+         'noseTh=[%.3f %.3f], irisTh=[%.3f %.3f]\n'], ...
+        nose_cx, nose_cy, ear_open, EAR_THRESH, ...
+        NOSE_THRESH(1), NOSE_THRESH(2), IRIS_THRESH(1), IRIS_THRESH(2));
 
 %% State variables
 fprintf('Entering main loop...\n');
 % Owl
 head_away_start = NaN;    
 long_alarm      = false;
-short_log       = zeros(0,2);
+owl_short_segments = zeros(0,2);
 short_alarm     = false;
-short_focus_start = NaN;  
+owl_focus_start = NaN;  
+owl_short_alarm_since = NaN;
 
 % Lizard 
 lizard_away_start = NaN;
 lizard_alarm_long = false;
-lizard_short_log  = zeros(0,2);
+lizard_short_segments = zeros(0,2);
 lizard_alarm_short= false;
 lizard_focus_start= NaN;
+lizard_short_alarm_since = NaN;
 
 % Eyes 
 eye_close_start = NaN;    
@@ -195,6 +239,7 @@ rgb_buf  = zeros(0,3);
 t_buf    = zeros(0,1);
 hr_bpm   = NaN;
 t_last_hr = -Inf;
+hr_hist  = zeros(0,1);
 
 state   = 'Focused on the road';
 state_alarm_sec = 0;
@@ -209,14 +254,20 @@ while ~getappdata(hFig,'stop')
     %% Get frame and landmarks
     [frame, h, w, lm] = getFrameAndLM(bridge);
     if isempty(frame); continue; end
+    [metrics, face_valid] = extractFaceMetrics(lm, RE_IDX, LE_IDX, NOSE_IDX, ...
+        R_IRIS_IDX, L_IRIS_IDX, R_EYE_OUT, R_EYE_IN, L_EYE_OUT, L_EYE_IN);
+    if ~face_valid
+        lm = [];
+    end
 
     %% Face not detected
     if isempty(lm)
         out = insertText(frame, [w/2, h/2], 'No face detected', ...
             'FontSize', 18, 'BoxColor', [200 0 0], 'BoxOpacity', 0.6, ...
             'TextColor', 'white', 'AnchorPoint', 'CenterCenter');
+        out = addOverlay(out, 'Warning', hr_bpm, 0);
         if RECORD; writeVideo(vw, out); end
-        hImg = showFrame(hImg, frame, hAx);
+        hImg = showFrame(hImg, out, hAx);
         set(hNoFaceTxt, 'Visible', 'on');
         drawnow limitrate;
         continue;
@@ -236,16 +287,21 @@ while ~getappdata(hFig,'stop')
 
     %% Update heart rate 
     if (t_now - t_last_hr) >= RPPG_UPDATE_SEC && size(rgb_buf,1) >= 60
-        hr_bpm    = estimateHR(rgb_buf, t_buf, BPM_RANGE);
+        [hr_raw, hr_quality] = estimateHR(rgb_buf, t_buf, BPM_RANGE);
+        if isfinite(hr_raw) && hr_quality > 0.10
+            if isempty(hr_hist) || abs(hr_raw - median(hr_hist(max(1,end-2):end))) <= 18 || hr_quality >= 0.22
+                hr_hist(end+1,1) = hr_raw;
+                hr_hist = hr_hist(max(1, end-4):end);
+                hr_bpm = median(hr_hist);
+            end
+        end
         t_last_hr = t_now;
     end
 
     %% Eye Aspect Ratio 
-    re = lm(RE_IDX, 1:2) .* [w h];
-    le = lm(LE_IDX, 1:2) .* [w h];
-    ear_r = computeEAR(re);
-    ear_l = computeEAR(le);
-    ear   = (ear_r + ear_l) / 2;
+    ear_r = metrics.ear_r;
+    ear_l = metrics.ear_l;
+    ear   = metrics.ear;
     eyes_closed = ear < EAR_THRESH;
 
     % Eye alarm state machine
@@ -272,105 +328,125 @@ while ~getappdata(hFig,'stop')
     end
 
     %% Nose-tip gaze (Owl distraction)
-    nose_x  = lm(NOSE_IDX, 1);
-    nose_y  = lm(NOSE_IDX, 2);
+    nose_x  = metrics.nose_rel_x;
+    nose_y  = metrics.nose_rel_y;
     nose_dx = nose_x - nose_cx;
     nose_dy = nose_y - nose_cy;
-    % Suppress owl detection while eye-closure counter is running: priority
-    % is on microsleep/sleep; don't accumulate distraction during closure.
+    % Owl is based on head pose relative to the eyes, not absolute image position.
     head_away = ~eyes_closed && ...
-        (abs(nose_dx) > NOSE_THRESH || abs(nose_dy) > NOSE_THRESH);
+        (abs(nose_dx) > NOSE_THRESH(1) || abs(nose_dy) > NOSE_THRESH(2));
 
-    % Long owl
+    % Long owl + short owl episode tracking
+    owl_short_window_start = t_now - SHORT_OWL_WIN;
+    owl_short_segments = owl_short_segments(owl_short_segments(:,2) >= owl_short_window_start, :);
+    owl_completed_short_sec = cumulativeWindowDuration(owl_short_segments, owl_short_window_start, t_now);
+    owl_current_short_sec = 0;
+
     if head_away
         if isnan(head_away_start); head_away_start = t_now; end
-        if (t_now - head_away_start) >= LONG_OWL_SEC
+        owl_away_sec = t_now - head_away_start;
+        if owl_away_sec >= LONG_OWL_SEC
             long_alarm = true;
+            if short_alarm && owl_completed_short_sec < SHORT_OWL_CUM
+                short_alarm = false;
+                owl_focus_start = NaN;
+                owl_short_alarm_since = NaN;
+            end
+        else
+            owl_current_short_sec = owl_away_sec;
         end
     else
+        if ~isnan(head_away_start)
+            owl_away_sec = t_now - head_away_start;
+            if owl_away_sec > 0 && owl_away_sec < LONG_OWL_SEC
+                owl_short_segments(end+1,:) = [head_away_start, t_now];
+            end
+        end
         head_away_start = NaN;
         long_alarm = false;   
     end
 
-    % Short owl (sliding window)
-    short_log(end+1,:) = [t_now, double(head_away)];
-    short_log = short_log(short_log(:,1) >= t_now - SHORT_OWL_WIN, :);
-    cumul_away = 0;
-    if size(short_log,1) >= 2
-        dt_s = diff(short_log(:,1));
-        cumul_away = sum(dt_s .* short_log(1:end-1,2));
-    end
+    % Short owl: cumulative duration of only short away episodes in 30 s
+    cumul_away = owl_completed_short_sec + owl_current_short_sec;
     if short_alarm
         if ~head_away
-            if isnan(short_focus_start); short_focus_start = t_now; end
-            if (t_now - short_focus_start) >= SHORT_OWL_RESET
+            if isnan(owl_focus_start); owl_focus_start = t_now; end
+            if (t_now - owl_focus_start) >= SHORT_OWL_RESET
                 short_alarm = false;
-                short_focus_start = NaN;
-                short_log = zeros(0,2);  % fresh window after recovery
+                owl_focus_start = NaN;
+                owl_short_alarm_since = NaN;
+                owl_short_segments = zeros(0,2);  % fresh window after recovery
             end
         else
-            short_focus_start = NaN;
+            owl_focus_start = NaN;
         end
     else
-        if cumul_away >= SHORT_OWL_CUM
+        if cumul_away >= SHORT_OWL_CUM && ~long_alarm
             short_alarm       = true;
-            short_focus_start = NaN;
+            owl_focus_start   = NaN;
+            owl_short_alarm_since = t_now;
         end
     end
 
     %% Iris gaze in Lizard distraction
-    r_iris_x = lm(R_IRIS_IDX, 1);
-    l_iris_x = lm(L_IRIS_IDX, 1);
-    r_iris_y = lm(R_IRIS_IDX, 2);
-    l_iris_y = lm(L_IRIS_IDX, 2);
-    r_eye_cx = (lm(R_EYE_OUT,1) + lm(R_EYE_IN,1)) / 2;
-    l_eye_cx = (lm(L_EYE_OUT,1) + lm(L_EYE_IN,1)) / 2;
-    % Vertical eye centre from EAR up/down landmarks (normalised y)
-    r_eye_cy = (lm(RE_IDX(2),2) + lm(RE_IDX(3),2) + lm(RE_IDX(5),2) + lm(RE_IDX(6),2)) / 4;
-    l_eye_cy = (lm(LE_IDX(2),2) + lm(LE_IDX(3),2) + lm(LE_IDX(5),2) + lm(LE_IDX(6),2)) / 4;
-    r_offset   = r_iris_x - r_eye_cx;
-    l_offset   = l_iris_x - l_eye_cx;
-    r_offset_y = r_iris_y - r_eye_cy;
-    l_offset_y = l_iris_y - l_eye_cy;
+    r_offset   = metrics.r_iris_h - r_iris_base(1);
+    l_offset   = metrics.l_iris_h - l_iris_base(1);
+    r_offset_y = metrics.r_iris_v - r_iris_base(2);
+    l_offset_y = metrics.l_iris_v - l_iris_base(2);
 
     lizard_away = ~head_away && ~eyes_closed && ...
-        (abs(r_offset) > IRIS_THRESH || abs(l_offset) > IRIS_THRESH || ...
-         abs(r_offset_y) > IRIS_THRESH || abs(l_offset_y) > IRIS_THRESH);
+        (abs(r_offset) > IRIS_THRESH(1) || abs(l_offset) > IRIS_THRESH(1) || ...
+         abs(r_offset_y) > IRIS_THRESH(2) || abs(l_offset_y) > IRIS_THRESH(2));
 
-    % Lizard long
+    % Lizard long + short episode tracking
+    lizard_short_window_start = t_now - SHORT_OWL_WIN;
+    lizard_short_segments = lizard_short_segments(lizard_short_segments(:,2) >= lizard_short_window_start, :);
+    lizard_completed_short_sec = cumulativeWindowDuration(lizard_short_segments, lizard_short_window_start, t_now);
+    lizard_current_short_sec = 0;
+
     if lizard_away
         if isnan(lizard_away_start); lizard_away_start = t_now; end
-        if (t_now - lizard_away_start) >= LONG_OWL_SEC
+        lizard_away_sec = t_now - lizard_away_start;
+        if lizard_away_sec >= LONG_OWL_SEC
             lizard_alarm_long = true;
+            if lizard_alarm_short && lizard_completed_short_sec < SHORT_OWL_CUM
+                lizard_alarm_short = false;
+                lizard_focus_start = NaN;
+                lizard_short_alarm_since = NaN;
+            end
+        else
+            lizard_current_short_sec = lizard_away_sec;
         end
     else
+        if ~isnan(lizard_away_start)
+            lizard_away_sec = t_now - lizard_away_start;
+            if lizard_away_sec > 0 && lizard_away_sec < LONG_OWL_SEC
+                lizard_short_segments(end+1,:) = [lizard_away_start, t_now];
+            end
+        end
         lizard_away_start = NaN;
         lizard_alarm_long = false;
     end
 
-    % Lizard short
-    lizard_short_log(end+1,:) = [t_now, double(lizard_away)];
-    lizard_short_log = lizard_short_log(lizard_short_log(:,1) >= t_now - SHORT_OWL_WIN, :);
-    cumul_liz = 0;
-    if size(lizard_short_log,1) >= 2
-        dt_l    = diff(lizard_short_log(:,1));
-        cumul_liz = sum(dt_l .* lizard_short_log(1:end-1,2));
-    end
+    % Lizard short: cumulative duration of only short away episodes in 30 s
+    cumul_liz = lizard_completed_short_sec + lizard_current_short_sec;
     if lizard_alarm_short
         if ~lizard_away
             if isnan(lizard_focus_start); lizard_focus_start = t_now; end
             if (t_now - lizard_focus_start) >= SHORT_OWL_RESET
                 lizard_alarm_short = false;
                 lizard_focus_start = NaN;
-                lizard_short_log   = zeros(0,2);  % flush to prevent immediate re-trigger
+                lizard_short_alarm_since = NaN;
+                lizard_short_segments = zeros(0,2);  % flush to prevent immediate re-trigger
             end
         else
             lizard_focus_start = NaN;
         end
     else
-        if cumul_liz >= SHORT_OWL_CUM
+        if cumul_liz >= SHORT_OWL_CUM && ~lizard_alarm_long
             lizard_alarm_short = true;
             lizard_focus_start = NaN;
+            lizard_short_alarm_since = t_now;
         end
     end
 
@@ -381,19 +457,30 @@ while ~getappdata(hFig,'stop')
         state_alarm_sec = max(0, t_now - eye_close_start - SLEEP_SEC);
     elseif eye_alarm == 1
         state = 'Microsleep';
-    elseif long_alarm || lizard_alarm_long
-        state = 'Distracted (long)';
-        owl_long_sec = 0;
-        liz_long_sec = 0;
-        if long_alarm && ~isnan(head_away_start)
-            owl_long_sec = max(0, t_now - head_away_start - LONG_OWL_SEC);
+    elseif long_alarm
+        state = 'Distracted (long owl)';
+        if ~isnan(head_away_start)
+            state_alarm_sec = max(0, t_now - head_away_start - LONG_OWL_SEC);
         end
-        if lizard_alarm_long && ~isnan(lizard_away_start)
-            liz_long_sec = max(0, t_now - lizard_away_start - LONG_OWL_SEC);
+    elseif lizard_alarm_long
+        state = 'Distracted (long lizard)';
+        if ~isnan(lizard_away_start)
+            state_alarm_sec = max(0, t_now - lizard_away_start - LONG_OWL_SEC);
         end
-        state_alarm_sec = max(owl_long_sec, liz_long_sec);
-    elseif short_alarm || lizard_alarm_short
-        state = 'Distracted (short)';
+    elseif short_alarm && lizard_alarm_short
+        if lizard_away
+            state = 'Distracted (short lizard)';
+        elseif head_away
+            state = 'Distracted (short owl)';
+        elseif owl_short_alarm_since >= lizard_short_alarm_since
+            state = 'Distracted (short owl)';
+        else
+            state = 'Distracted (short lizard)';
+        end
+    elseif short_alarm
+        state = 'Distracted (short owl)';
+    elseif lizard_alarm_short
+        state = 'Distracted (short lizard)';
     else
         state = 'Focused on the road';
     end
@@ -401,9 +488,10 @@ while ~getappdata(hFig,'stop')
     %%  Compose output frame 
     out = drawLandmarks(frame, lm);   % eye contours (red), iris (green), nose (blue)
     out = insertText(out, [w/2, 5], ...
-        sprintf(['EAR %.3f | irisR %+.3f/%+.3f  irisL %+.3f/%+.3f | ' ...
-                 'nose %.3f/%.3f (d %+.3f/%+.3f)'], ...
-                ear, r_offset, r_offset_y, l_offset, l_offset_y, ...
+        sprintf(['EAR %.3f<th %.3f | irisR %+.3f/%+.3f  irisL %+.3f/%+.3f | ' ...
+                 'noseRel %.3f/%.3f (d %+.3f/%+.3f)'], ...
+                ear, EAR_THRESH, ...
+                r_offset, r_offset_y, l_offset, l_offset_y, ...
                 nose_x, nose_y, nose_dx, nose_dy), ...
         'FontSize', 12, 'BoxColor', [0 0 0], 'BoxOpacity', 0.5, ...
         'TextColor', 'white', 'AnchorPoint', 'CenterTop');
@@ -422,3 +510,57 @@ else
 end
 bridge.release();
 try close(hFig); catch; end
+
+function total_sec = cumulativeWindowDuration(segments, winStart, winEnd)
+    total_sec = 0;
+    if isempty(segments)
+        return;
+    end
+
+    segStarts = max(segments(:,1), winStart);
+    segEnds   = min(segments(:,2), winEnd);
+    total_sec = sum(max(0, segEnds - segStarts));
+end
+
+function sigma = robustStd(x)
+    x = x(isfinite(x));
+    if isempty(x)
+        sigma = 0;
+        return;
+    end
+    sigma = 1.4826 * median(abs(x - median(x)));
+end
+
+function pythonExe = resolvePythonExecutable(scriptDir)
+    pythonExe = "";
+    candidates = strings(0,1);
+
+    envPython = string(strtrim(getenv('DMS_PYTHON')));
+    if strlength(envPython) > 0
+        candidates(end+1,1) = envPython;
+    end
+
+    homeDir = string(getenv('HOME'));
+    if strlength(homeDir) > 0
+        candidates(end+1,1) = fullfile(homeDir, "dms_env", "bin", "python");
+    end
+    candidates(end+1,1) = fullfile(string(scriptDir), "venv", "bin", "python");
+
+    [statusPy3, cmdoutPy3] = system('command -v python3');
+    if statusPy3 == 0
+        candidates(end+1,1) = string(strtrim(cmdoutPy3));
+    end
+
+    [statusPy, cmdoutPy] = system('command -v python');
+    if statusPy == 0
+        candidates(end+1,1) = string(strtrim(cmdoutPy));
+    end
+
+    candidates = unique(candidates(candidates ~= ""));
+    for k = 1:numel(candidates)
+        if isfile(candidates(k))
+            pythonExe = candidates(k);
+            return;
+        end
+    end
+end
