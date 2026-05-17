@@ -8,17 +8,17 @@ function out = addOverlay(frame, state, hr_bpm, state_alarm_sec)
 
     switch state
         case 'Focused on the road'
-            stateColor = [0 140 0];
+            stateColor = [40 205 50]; %lime green
         case {'Distracted (short owl)', 'Distracted (short lizard)'}
-            stateColor = [230 140 0];
+            stateColor = [253 117 1]; %orange
         case {'Distracted (long owl)', 'Distracted (long lizard)'}
-            stateColor = [220 70 0];
+            stateColor = [180 21 0];
         case 'Microsleep'
             stateColor = [220 120 0];
         case 'Sleep'
-            stateColor = [190 0 0];
+            stateColor = [180 21 0];
         case 'Warning'
-            stateColor = [180 0 0];
+            stateColor = [180 21 0];
         otherwise
             stateColor = [40 40 40];
     end

@@ -11,8 +11,8 @@ addpath(fullfile(scriptDir, 'helper_functions'));
 
 %% Parameters
 CALIB_SEC        = 3;     % target seconds of valid forward-looking calibration data
-CALIB_MAX_SEC    = 12;    % maximum wall-clock time allowed for calibration
-CALIB_MIN_FRAMES = 50;    % minimum valid frames required to lock the baselines
+CALIB_MAX_SEC    = 20;    % maximum wall-clock time allowed for calibration
+CALIB_MIN_FRAMES = 40;    % minimum valid frames required to lock the baselines
 LONG_OWL_SEC     = 5.0;   % continuous head-away time for long owl alarm
 SHORT_OWL_WIN    = 30.0;  % sliding-window length for short owl [s]
 SHORT_OWL_CUM    = 10.0;  % cumulative away time inside window [s]
@@ -27,6 +27,10 @@ EAR_THRESH_RANGE = [0.18 0.34];
 NOSE_THRESH_MIN  = [0.10 0.12]; % [x y] minimum threshold on nose-vs-eyes relative pose
 IRIS_THRESH_MIN  = [0.12 0.18]; % [x y] minimum threshold on normalized iris motion
 RECORD           = true;  % set false to skip MP4 saving (live preview only)
+GRID_COLOR       = [0 0 0];
+CENTER_BOX_OK    = [154 205 50]; % verde oliva chiaro
+CENTER_BOX_WARN  = [180 21 0]; % rosso
+FACE_GUIDE_MSG   = 'Keep your face in the centre';
 timestamp        = char(datetime('now','Format','yyyyMMdd_HHmmss'));
 OUT_FILE         = fullfile(scriptDir, 'results', sprintf('DMS_output_%s.mp4', timestamp));
 
@@ -114,9 +118,10 @@ end
 
 %% Display figure 
 fprintf('Initialising display...\n');
-hFig = figure('Name','DMS - press any key to stop','NumberTitle','off', ...
-              'KeyPressFcn', @(~,~) setappdata(gcf,'stop',true));
+hFig = figure('Name','DMS - press C to recalibrate, S to stop','NumberTitle','off', ...
+              'KeyPressFcn', @handleKeyPress);
 setappdata(hFig,'stop',false);
+setappdata(hFig,'recalibrate',false);
 % Image axes
 hAx = axes('Parent', hFig, 'Position', [0 0 1 1], ...
            'Visible', 'off', 'XTick', [], 'YTick', []);
@@ -130,126 +135,155 @@ hNoFaceTxt = text(0.5, 0.5, 'No face detected', 'Parent', hAxOv, ...
     'Color', 'white', 'BackgroundColor', [0.78 0 0], 'Visible', 'off');
 hImg = [];
 
-%% Calibration phase 
-fprintf('Calibration: look forward for %.0f seconds of valid face data...\n', CALIB_SEC);
-
-calibCap = max(CALIB_MIN_FRAMES + 20, ceil(CALIB_MAX_SEC * 25));
-calib_nose_x = zeros(calibCap, 1);
-calib_nose_y = zeros(calibCap, 1);
-calib_ears   = zeros(calibCap, 1);
-calib_rh     = zeros(calibCap, 1);
-calib_lh     = zeros(calibCap, 1);
-calib_rv     = zeros(calibCap, 1);
-calib_lv     = zeros(calibCap, 1);
-n_calib  = 0;
-t_calib  = tic;
-
-while n_calib < CALIB_MIN_FRAMES && toc(t_calib) < CALIB_MAX_SEC
-    [frame, h, w, lm] = getFrameAndLM(bridge);
-    if isempty(frame)
-        drawnow limitrate;
-        continue;
-    end
-
-    [metrics, face_valid] = extractFaceMetrics(lm, RE_IDX, LE_IDX, NOSE_IDX, ...
-        R_IRIS_IDX, L_IRIS_IDX, R_EYE_OUT, R_EYE_IN, L_EYE_OUT, L_EYE_IN);
-
-    if face_valid
-        n_calib = n_calib + 1;
-        calib_nose_x(n_calib) = metrics.nose_rel_x;
-        calib_nose_y(n_calib) = metrics.nose_rel_y;
-        calib_ears(n_calib)   = metrics.ear;
-        calib_rh(n_calib)     = metrics.r_iris_h;
-        calib_lh(n_calib)     = metrics.l_iris_h;
-        calib_rv(n_calib)     = metrics.r_iris_v;
-        calib_lv(n_calib)     = metrics.l_iris_v;
-        frame = drawLandmarks(frame, lm);
-        msg = sprintf('Calibrating... %d/%d valid frames', n_calib, CALIB_MIN_FRAMES);
-        boxColor = [0 120 0];
-    else
-        msg = sprintf('Calibration: keep both eyes and nose visible (%d/%d)', n_calib, CALIB_MIN_FRAMES);
-        boxColor = [180 80 0];
-    end
-
-    frame = insertText(frame, [w/2, 30], msg, ...
-        'FontSize', 16, 'BoxColor', boxColor, 'BoxOpacity', 0.65, 'TextColor', 'white', ...
-        'AnchorPoint', 'CenterTop');
-    hImg = showFrame(hImg, frame, hAx);
-    drawnow limitrate;
-end
-
-if n_calib < CALIB_MIN_FRAMES
-    bridge.release();
-    try close(hFig); catch; end
-    error('runDMS:CalibrationFailed', ...
-        'Calibration failed: not enough valid face frames. Keep eyes and nose visible and try again.');
-end
-
-calib_nose_x = calib_nose_x(1:n_calib);
-calib_nose_y = calib_nose_y(1:n_calib);
-calib_ears   = calib_ears(1:n_calib);
-calib_rh     = calib_rh(1:n_calib);
-calib_lh     = calib_lh(1:n_calib);
-calib_rv     = calib_rv(1:n_calib);
-calib_lv     = calib_lv(1:n_calib);
-
-nose_cx = median(calib_nose_x);
-nose_cy = median(calib_nose_y);
-ear_open = median(calib_ears);
-EAR_THRESH = min(EAR_THRESH_RANGE(2), max(EAR_THRESH_RANGE(1), ...
-    ear_open - max([0.04, 3 * robustStd(calib_ears), 0.22 * ear_open])));
-NOSE_THRESH = max(NOSE_THRESH_MIN, ...
-    [4 * robustStd(calib_nose_x), 4 * robustStd(calib_nose_y)]);
-r_iris_base = [median(calib_rh), median(calib_rv)];
-l_iris_base = [median(calib_lh), median(calib_lv)];
-IRIS_THRESH = max(IRIS_THRESH_MIN, ...
-    [4 * max(robustStd(calib_rh), robustStd(calib_lh)), ...
-     4 * max(robustStd(calib_rv), robustStd(calib_lv))]);
-
-fprintf(['Calibration locked: nose=[%.3f %.3f], EARopen=%.3f, EARth=%.3f, ' ...
-         'noseTh=[%.3f %.3f], irisTh=[%.3f %.3f]\n'], ...
-        nose_cx, nose_cy, ear_open, EAR_THRESH, ...
-        NOSE_THRESH(1), NOSE_THRESH(2), IRIS_THRESH(1), IRIS_THRESH(2));
-
-%% State variables
-fprintf('Entering main loop...\n');
-% Owl
-head_away_start = NaN;    
-long_alarm      = false;
-owl_short_segments = zeros(0,2);
-short_alarm     = false;
-owl_focus_start = NaN;  
-owl_short_alarm_since = NaN;
-
-% Lizard 
-lizard_away_start = NaN;
-lizard_alarm_long = false;
-lizard_short_segments = zeros(0,2);
-lizard_alarm_short= false;
-lizard_focus_start= NaN;
-lizard_short_alarm_since = NaN;
-
-% Eyes 
-eye_close_start = NaN;    
-eye_open_start  = NaN;     
-eye_alarm       = 0;       
-
-% rPPG 
-rgb_buf  = zeros(0,3);
-t_buf    = zeros(0,1);
-hr_bpm   = NaN;
-t_last_hr = -Inf;
-hr_hist  = zeros(0,1);
-
-state   = 'Focused on the road';
-state_alarm_sec = 0;
+need_recalibration = true;
 t_start = tic;
 
-%% Main Loop
-fprintf('DMS running. Press any key in the figure window to stop.\n');
-
 while ~getappdata(hFig,'stop')
+    if need_recalibration
+        fprintf('Calibration: look forward for %.0f seconds of valid face data...\n', CALIB_SEC);
+
+        calibCap = max(CALIB_MIN_FRAMES + 20, ceil(CALIB_MAX_SEC * 25));
+        calib_nose_x = zeros(calibCap, 1);
+        calib_nose_y = zeros(calibCap, 1);
+        calib_ears   = zeros(calibCap, 1);
+        calib_rh     = zeros(calibCap, 1);
+        calib_lh     = zeros(calibCap, 1);
+        calib_rv     = zeros(calibCap, 1);
+        calib_lv     = zeros(calibCap, 1);
+        n_calib = 0;
+        t_calib = tic;
+        setappdata(hFig, 'recalibrate', false);
+
+        while n_calib < CALIB_MIN_FRAMES && toc(t_calib) < CALIB_MAX_SEC
+            if getappdata(hFig,'stop')
+                break;
+            end
+            if getappdata(hFig,'recalibrate')
+                setappdata(hFig, 'recalibrate', false);
+                n_calib = 0;
+                t_calib = tic;
+            end
+
+            [frame, h, w, lm] = getFrameAndLM(bridge);
+            if isempty(frame)
+                drawnow limitrate;
+                continue;
+            end
+
+            [metrics, face_valid] = extractFaceMetrics(lm, RE_IDX, LE_IDX, NOSE_IDX, ...
+                R_IRIS_IDX, L_IRIS_IDX, R_EYE_OUT, R_EYE_IN, L_EYE_OUT, L_EYE_IN);
+            face_in_center = false;
+            if face_valid
+                face_in_center = isFaceInsideCenter(lm, w, h);
+            end
+
+            if face_valid && face_in_center
+                n_calib = n_calib + 1;
+                calib_nose_x(n_calib) = metrics.nose_rel_x;
+                calib_nose_y(n_calib) = metrics.nose_rel_y;
+                calib_ears(n_calib)   = metrics.ear;
+                calib_rh(n_calib)     = metrics.r_iris_h;
+                calib_lh(n_calib)     = metrics.l_iris_h;
+                calib_rv(n_calib)     = metrics.r_iris_v;
+                calib_lv(n_calib)     = metrics.l_iris_v;
+                frame = drawLandmarks(frame, lm);
+                msg = sprintf('Calibrating... %d/%d valid frames', n_calib, CALIB_MIN_FRAMES);
+                boxColor = [0 120 0];
+            elseif face_valid
+                frame = drawLandmarks(frame, lm);
+                msg = sprintf('Calibration: keep face in the centre (%d/%d)', n_calib, CALIB_MIN_FRAMES);
+                boxColor = [180 80 0];
+            else
+                msg = sprintf('Calibration: keep both eyes and nose visible (%d/%d)', n_calib, CALIB_MIN_FRAMES);
+                boxColor = [180 80 0];
+            end
+
+            frame = drawAttentionGrid(frame, w, h, face_in_center, GRID_COLOR, CENTER_BOX_OK, CENTER_BOX_WARN);
+            frame = insertText(frame, [w/2, 30], msg, ...
+                'FontSize', 16, 'BoxColor', boxColor, 'BoxOpacity', 0.65, 'TextColor', 'white', ...
+                'AnchorPoint', 'CenterTop');
+            hImg = showFrame(hImg, frame, hAx);
+            drawnow limitrate;
+        end
+
+        if getappdata(hFig,'stop')
+            break;
+        end
+
+        if n_calib < CALIB_MIN_FRAMES
+            warning('runDMS:CalibrationRetry', ...
+                'Calibration incomplete. Press C to retry or keep your face centered and wait.');
+            continue;
+        end
+
+        calib_nose_x = calib_nose_x(1:n_calib);
+        calib_nose_y = calib_nose_y(1:n_calib);
+        calib_ears   = calib_ears(1:n_calib);
+        calib_rh     = calib_rh(1:n_calib);
+        calib_lh     = calib_lh(1:n_calib);
+        calib_rv     = calib_rv(1:n_calib);
+        calib_lv     = calib_lv(1:n_calib);
+
+        nose_cx = median(calib_nose_x);
+        nose_cy = median(calib_nose_y);
+        ear_open = median(calib_ears);
+        EAR_THRESH = min(EAR_THRESH_RANGE(2), max(EAR_THRESH_RANGE(1), ...
+            ear_open - max([0.04, 3 * robustStd(calib_ears), 0.22 * ear_open])));
+        NOSE_THRESH = max(NOSE_THRESH_MIN, ...
+            [4 * robustStd(calib_nose_x), 4 * robustStd(calib_nose_y)]);
+        r_iris_base = [median(calib_rh), median(calib_rv)];
+        l_iris_base = [median(calib_lh), median(calib_lv)];
+        IRIS_THRESH = max(IRIS_THRESH_MIN, ...
+            [4 * max(robustStd(calib_rh), robustStd(calib_lh)), ...
+             4 * max(robustStd(calib_rv), robustStd(calib_lv))]);
+
+        fprintf(['Calibration locked: nose=[%.3f %.3f], EARopen=%.3f, EARth=%.3f, ' ...
+                 'noseTh=[%.3f %.3f], irisTh=[%.3f %.3f]\n'], ...
+                nose_cx, nose_cy, ear_open, EAR_THRESH, ...
+                NOSE_THRESH(1), NOSE_THRESH(2), IRIS_THRESH(1), IRIS_THRESH(2));
+
+        fprintf('Entering main loop...\n');
+        % Owl
+        head_away_start = NaN;    
+        long_alarm      = false;
+        owl_short_segments = zeros(0,2);
+        short_alarm     = false;
+        owl_focus_start = NaN;  
+        owl_short_alarm_since = NaN;
+
+        % Lizard 
+        lizard_away_start = NaN;
+        lizard_alarm_long = false;
+        lizard_short_segments = zeros(0,2);
+        lizard_alarm_short= false;
+        lizard_focus_start= NaN;
+        lizard_short_alarm_since = NaN;
+
+        % Eyes 
+        eye_close_start = NaN;    
+        eye_open_start  = NaN;     
+        eye_alarm       = 0;       
+
+        % rPPG 
+        rgb_buf  = zeros(0,3);
+        t_buf    = zeros(0,1);
+        hr_bpm   = NaN;
+        t_last_hr = -Inf;
+        hr_hist  = zeros(0,1);
+
+        state   = 'Focused on the road';
+        state_alarm_sec = 0;
+        t_start = tic;
+        need_recalibration = false;
+    end
+
     t_now = toc(t_start);
+
+    if getappdata(hFig,'recalibrate')
+        setappdata(hFig, 'recalibrate', false);
+        need_recalibration = true;
+        continue;
+    end
 
     %% Get frame and landmarks
     [frame, h, w, lm] = getFrameAndLM(bridge);
@@ -262,7 +296,8 @@ while ~getappdata(hFig,'stop')
 
     %% Face not detected
     if isempty(lm)
-        out = insertText(frame, [w/2, h/2], 'No face detected', ...
+        out = drawAttentionGrid(frame, w, h, false, GRID_COLOR, CENTER_BOX_OK, CENTER_BOX_WARN);
+        out = insertText(out, [w/2, h/2], 'No face detected', ...
             'FontSize', 18, 'BoxColor', [200 0 0], 'BoxOpacity', 0.6, ...
             'TextColor', 'white', 'AnchorPoint', 'CenterCenter');
         out = addOverlay(out, 'Warning', hr_bpm, 0);
@@ -273,6 +308,20 @@ while ~getappdata(hFig,'stop')
         continue;
     end
     set(hNoFaceTxt, 'Visible', 'off');   
+
+    face_in_center = isFaceInsideCenter(lm, w, h);
+    if ~face_in_center
+        out = drawLandmarks(frame, lm);
+        out = drawAttentionGrid(out, w, h, false, GRID_COLOR, CENTER_BOX_OK, CENTER_BOX_WARN);
+        out = insertText(out, [w/2, 40], FACE_GUIDE_MSG, ...
+            'FontSize', 18, 'BoxColor', [200 0 0], 'BoxOpacity', 0.75, ...
+            'TextColor', 'white', 'AnchorPoint', 'CenterTop');
+        out = addOverlay(out, 'Warning', hr_bpm, 0);
+        if RECORD; writeVideo(vw, out); end
+        hImg = showFrame(hImg, out, hAx);
+        drawnow limitrate;
+        continue;
+    end
 
     %% Accumulate rPPG signal 
     mean_rgb = getFaceMeanRGB(frame, lm);
@@ -487,6 +536,7 @@ while ~getappdata(hFig,'stop')
 
     %%  Compose output frame 
     out = drawLandmarks(frame, lm);   % eye contours (red), iris (green), nose (blue)
+    out = drawAttentionGrid(out, w, h, true, GRID_COLOR, CENTER_BOX_OK, CENTER_BOX_WARN);
     out = insertText(out, [w/2, 5], ...
         sprintf(['EAR %.3f<th %.3f | irisR %+.3f/%+.3f  irisL %+.3f/%+.3f | ' ...
                  'noseRel %.3f/%.3f (d %+.3f/%+.3f)'], ...
@@ -520,6 +570,65 @@ function total_sec = cumulativeWindowDuration(segments, winStart, winEnd)
     segStarts = max(segments(:,1), winStart);
     segEnds   = min(segments(:,2), winEnd);
     total_sec = sum(max(0, segEnds - segStarts));
+end
+
+function out = drawAttentionGrid(frame, w, h, faceInCenter, gridColor, okColor, warnColor)
+    out = frame;
+
+    x1 = round(w*0.25);
+    x2 = round(w*0.75);
+    y1 = round(h*0.25);
+    y2 = round(h*0.75);
+
+    boxColor = okColor;
+    if ~faceInCenter
+        boxColor = warnColor;
+    end
+
+    centerRect = [x1 y1 max(1, x2 - x1) max(1, y2 - y1)];
+    dashLen = max(24, round(min(w, h) * 0.05));
+    gapLen = max(18, round(min(w, h) * 0.035));
+
+    out = drawDashedLine(out, [x1 1], [x1 h], dashLen, gapLen, gridColor, 1);
+    out = drawDashedLine(out, [x2 1], [x2 h], dashLen, gapLen, gridColor, 1);
+    out = drawDashedLine(out, [1 y1], [w y1], dashLen, gapLen, gridColor, 1);
+    out = drawDashedLine(out, [1 y2], [w y2], dashLen, gapLen, gridColor, 1);
+    out = insertShape(out, 'Rectangle', centerRect, 'Color', boxColor, 'LineWidth', 3);
+end
+
+function out = drawDashedLine(frame, startPt, endPt, dashLen, gapLen, color, lineWidth)
+    out = frame;
+    totalLen = hypot(endPt(1) - startPt(1), endPt(2) - startPt(2));
+    if totalLen <= 0
+        return;
+    end
+
+    direction = (endPt - startPt) / totalLen;
+    stepLen = dashLen + gapLen;
+    dashStarts = 0:stepLen:totalLen;
+
+    for i = 1:numel(dashStarts)
+        segStart = startPt + direction * dashStarts(i);
+        segEnd = startPt + direction * min(dashStarts(i) + dashLen, totalLen);
+        out = insertShape(out, 'Line', [segStart segEnd], ...
+            'Color', color, 'LineWidth', lineWidth);
+    end
+end
+
+function isInside = isFaceInsideCenter(lm, w, h)
+    faceOval = [10 338 297 332 284 251 389 356 454 323 361 288 397 365 ...
+                379 378 400 377 152 148 176 149 150 136 172 58 132 93 ...
+                234 127 162 21 54 103 67 109] + 1;
+    facePts = lm(faceOval, 1:2) .* [w h];
+
+    faceCenter = mean([min(facePts, [], 1); max(facePts, [], 1)], 1);
+    xMin = w*0.25;
+    xMax = w*0.75;
+    yMin = h*0.25;
+    yMax = h*0.75;
+
+    isInside = faceCenter(1) >= xMin && faceCenter(1) <= xMax && ...
+        faceCenter(2) >= yMin && faceCenter(2) <= yMax;
 end
 
 function sigma = robustStd(x)
@@ -558,9 +667,39 @@ function pythonExe = resolvePythonExecutable(scriptDir)
 
     candidates = unique(candidates(candidates ~= ""));
     for k = 1:numel(candidates)
-        if isfile(candidates(k))
+        candidate = candidates(k);
+        if contains(candidate, string(filesep) + ".pyenv" + string(filesep) + "shims" + string(filesep))
+            continue;
+        end
+        if isUsablePython(candidate)
             pythonExe = candidates(k);
             return;
         end
+    end
+end
+
+function tf = isUsablePython(pythonPath)
+    tf = false;
+    if strlength(pythonPath) == 0 || ~isfile(pythonPath)
+        return;
+    end
+
+    pythonPath = string(pythonPath);
+    escapedPath = strrep(char(pythonPath), '''', '''''');
+    cmd = sprintf('''%s'' -c "import mediapipe, cv2; print(''ok'')"', escapedPath);
+    [status, cmdout] = system(cmd);
+    tf = (status == 0) && contains(string(cmdout), "ok");
+end
+
+function handleKeyPress(src, evt)
+    if nargin < 2 || isempty(evt) || ~isprop(evt, 'Key')
+        return;
+    end
+
+    switch lower(string(evt.Key))
+        case "c"
+            setappdata(src, 'recalibrate', true);
+        case "s"
+            setappdata(src, 'stop', true);
     end
 end

@@ -26,10 +26,16 @@ function out = drawLandmarks(frame, lm)
     leftIrisCircles = [lm(leftIris,1:2) .* [w h], repmat(2, numel(leftIris),1)];
     rightIrisCircles= [lm(rightIris,1:2).* [w h], repmat(2, numel(rightIris),1)];
     noseCircles     = [lm(noseTip, 1:2) .* [w h], repmat(2, numel(noseTip), 1)];
-    out = insertShape(out, 'Rectangle', rect, 'Color', 'cyan', 'LineWidth', 2);
-    out = insertShape(out, 'FilledCircle', leftEyeCircles,   'Color', 'red',   'Opacity', 1);
-    out = insertShape(out, 'FilledCircle', rightEyeCircles,  'Color', 'red',   'Opacity', 1);
-    out = insertShape(out, 'FilledCircle', leftIrisCircles,  'Color', 'green', 'Opacity', 1);
-    out = insertShape(out, 'FilledCircle', rightIrisCircles, 'Color', 'green', 'Opacity', 1);
-    out = insertShape(out, 'FilledCircle', noseCircles,      'Color', 'blue',  'Opacity', 1);
+    out = insertShape(out, 'Rectangle', rect, 'Color', [0 148 192], 'LineWidth', 2);
+    out = insertShape(out, 'FilledCircle', leftEyeCircles,   'Color', [180 21 0],   'Opacity', 1);
+    out = insertShape(out, 'FilledCircle', rightEyeCircles,  'Color', [180 21 0],   'Opacity', 1);
+    out = insertShape(out, 'FilledCircle', leftIrisCircles,  'Color', [46 139 87], 'Opacity', 1);
+    out = insertShape(out, 'FilledCircle', rightIrisCircles, 'Color', [46 139 87], 'Opacity', 1);
+    out = insertShape(out, 'FilledCircle', noseCircles,      'Color', [25 25 112],  'Opacity', 1);
+
+
+    % [0 148 192] azzurrino 
+    % [46 139 87] verde 
+    % [25 25 112] blu
+    % [180 21 0] rosso
 end
